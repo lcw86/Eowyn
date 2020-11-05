@@ -1,0 +1,44 @@
+{
+    "IN_GPIO":8,
+    "OUT_GPIO":9,
+    "DOWN_GPIO":10,
+    "UP_GPIO":11,
+    
+    "elect_magnet":12,
+    "FAN_IN_GPIO":13,
+    "FAN_OUT_GPIO":14,
+    
+    "UP_SENSOR":0,
+    "DOWN_SENSOR":1,
+    "IN_SENSOR":2,
+    "OUT_SENSOR":3,
+    "RESET_SENSOR":4,
+    "FAN_IN_SENSOR":5,
+    "FAN_OUT_SENSOR":6,
+    
+    
+    "GPIO_ON":1,
+    "GPIO_OFF":0,
+    "IN_OUT_SENSOR_ON":1,
+    "IN_OUT_SENSOR_OFF":0,
+    "UP_DOWN_SENSOR_ON":1,
+    "UP_DOWN_SENSOR_OFF":0,
+    "FAN_IN_OUT_SENSOR_ON":1,
+    "FAN_IN_OUT_SENSOR_OFF":0,
+    
+    "IN_STATE":1,
+    "OUT_STATE":2,
+    "DOWN_STATE":3,
+    "UNREADY_STATE":4,
+    
+    "DUT1_STATE":4,
+    "DUT2_STATE":5,
+    "DUT3_STATE":6,
+    "DUT4_STATE":7,
+    
+    "Default_IP":"192.168.100.12",
+    "FCT_IP":"169.254.1.20",
+    "DFU_IP":"10.0.200.177",
+    
+    
+}

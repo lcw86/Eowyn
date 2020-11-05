@@ -1,0 +1,986 @@
+//
+//  Eowyn.m
+//  Eowyn
+//
+//  Created by Shawn.S on 2019/9/16.
+//  Copyright © 2019 CYG Inc. All rights reserved.
+//
+
+#import "Eowyn.h"
+#import "ShowingLogVC.h"
+
+#define ADDR_24LC01        0xA0 >> 1    //eeprom address,0xA0 = Write address and 0xA1 is the read address.
+#define I2C_SPEED               100000
+#define I2C_SLAVE_ADDRESS7      0x30 >> 1
+
+
+#define kBufferSize 20
+
+@implementation Eowyn
+
+
+-(id)init{
+    self = [super init];
+    if (self) {
+        interface =nil;
+    }
+    return self;
+}
+
+-(void)LED
+{
+    [eowyn release];
+    //    [connector release];
+    [interface release];
+    [super dealloc];
+}
+
+-(BOOL)connectWithIP:(NSString *)connectIP
+{
+    
+    
+    @try {
+       
+        NSError * myError = nil;
+        
+        interface = [[ATDeviceSocketInterface alloc] initWithIPAddress:connectIP];
+        
+        [self show_log_debug:@"Opening interface Now!"];
+        
+        if(interface){
+         
+            if(![interface openWithError:&myError]){//ip如未ping通，调用此open函数，程序会卡死。
+                [self show_log_debug:[NSString stringWithFormat:@"Error opening interface %@", [myError localizedDescription]]];
+                
+                return NO;
+            }
+        }else{
+            
+            [self show_log_debug:@"No ATdeviceElements."];
+            return NO;
+        }
+        
+    } @catch (NSException *exception) {
+  
+        @throw exception;
+        return NO;
+    }
+
+    eowyn = [[ATDeviceEowyn alloc] initWithCommunicationInterface:interface];
+    return YES;
+}
+
+
+-(void)close{
+    [interface close];
+}
+
+//-(BOOL)configEuropeanConnector
+//{
+//    NSError * myError = nil;
+//    BOOL success = NO;
+//    connector = [ [ATDCarbonEuropeanConnector alloc] init];
+//    success = [connector addPinWithRow:EuropeanPortRowC andPin:12 andType:GPIO_Mode_AF_OD_NoPull_GPIO_AF_I2C2 andError:&myError];
+//
+//    //Configure the I2C1
+//    //i2c 1 SCL
+//    success = [connector addPinWithRow:EuropeanPortRowB andPin:12 andType:GPIO_Mode_AF_OD_NoPull_GPIO_AF_I2C1 andError:&myError];
+//    //i2c 1 SDA
+//    success = [connector addPinWithRow:EuropeanPortRowA andPin:12 andType:GPIO_Mode_AF_OD_NoPull_GPIO_AF_I2C1 andError:&myError];
+//
+////    NSLog(@"Start I2C write and then read Demo. It requires a 24C02 epprom and Carbon FW 0.0.8 or above");
+//
+//    if(myError){ NSLog(@"Failed to add pins %@", [myError localizedDescription]); return NO;}
+//
+//    //now configure the 2 pins
+//    [Eowyn configureEuropeanConnector:connector andError:&myError];
+//    if(myError){  NSLog(@"Error configure pins %@", [myError localizedDescription]); return NO;}
+//    return YES;
+//}
+//
+
+
+-(BOOL)configI2C
+{
+    NSError * myError = nil;
+    BOOL success = NO;
+    uint8_t i2cId = 1;
+    success = [eowyn configureI2C: 1
+                          andMode: ATDFixtureI2CModeI2C
+                       andI2cAddr: 0x30 >> 1
+                    andClockSpeed: 100000
+                     andEnableAck: YES
+                    andAckAddress: ATDFixtureI2CAckAddressMode7bit
+                         andError: &myError];
+    
+    
+    if(myError || !success){
+        
+        [self show_log_debug:[NSString stringWithFormat:@"Error configure I2C 2 %@", [myError localizedDescription]]];
+        return NO;}
+    return YES;
+}
+
+//-(unsigned char *)cw_stringToHex:(NSString *)hexStr{
+//    int len = hexStr.length;
+//    unsigned char aucKey[3] ;
+//    memset(aucKey, 0, 3);
+//
+//    int idx = 0;
+//    for (int j=0; j<len; j+=2)
+//    {
+//        NSString *mut_hexStr = [hexStr substringWithRange:NSMakeRange(j, 2)];
+//        NSScanner *scanner = [NSScanner scannerWithString:mut_hexStr];
+//        unsigned long long longValue ;
+//        [scanner scanHexLongLong:&longValue];
+//        unsigned char c = longValue;
+//        aucKey[idx] = c;
+//        idx++;
+//    }
+//
+//    return aucKey;
+//}
+
+
+unsigned char* stringFromHexString_2(NSString *hexString)
+{
+    unsigned long len = hexString.length/2;
+    unsigned char myBuffer[len] ;
+    memset(myBuffer, 0, sizeof(myBuffer));
+    int idx = 0;
+    for (int j=0; j<[hexString length]; j+=2)
+    {
+        NSString *hexStr = [hexString substringWithRange:NSMakeRange(j, 2)];
+        NSScanner *scanner = [NSScanner scannerWithString:hexStr];
+        unsigned long long longValue ;
+        [scanner scanHexLongLong:&longValue];
+        unsigned char c = longValue;
+        myBuffer[idx] = c;
+        idx++;
+    }
+    
+    //?  myBuffer[idx]='\0';
+    unsigned char *buffer = myBuffer;
+    return buffer;
+}
+const char* stringFromHexString(NSString *hexString)
+{
+    //    NSString *str=[NSString stringWithCString:hexString encoding:NSUTF8StringEncoding];
+    char *myBuffer = (char *)malloc((int)[hexString length] / 2 + 1);
+    bzero(myBuffer, [hexString length] / 2 + 1);
+    for (int i = 0; i < [hexString length] - 1; i += 2) {
+        unsigned int anInt;
+        NSString * hexCharStr = [hexString substringWithRange:NSMakeRange(i, 2)];
+        NSScanner * scanner = [[[NSScanner alloc] initWithString:hexCharStr] autorelease];
+        [scanner scanHexInt:&anInt];
+        myBuffer[i / 2] = (char)anInt;
+    }
+    //    NSString *unicodeString = [NSString stringWithCString:myBuffer encoding:4];
+    //    NSLog(@"------字符串=======%@",unicodeString);
+    return myBuffer;
+}
+//typedef NS_ENUM(uint8_t, ATDeviceDIOType) {
+//    ATDeviceDIOLow = 0,
+//    ATDeviceDIOHigh,
+//    ATDeviceDIOToggle,
+//    ATDeviceDIOFlash,
+//    ATDeviceDIOUnknown = 0xFF
+//
+//};
+-(NSString *)ATDeviceDIOType_to_stirng:(ATDeviceDIOType)type{
+    if (type == ATDeviceDIOLow) {
+        return @"0(ATDeviceDIOLow)";
+    }else if (type == ATDeviceDIOHigh){
+        return @"1(ATDeviceDIOHigh)";
+    }else if (type == ATDeviceDIOToggle){
+        return @"2(ATDeviceDIOToggle)";
+    }else if (type == ATDeviceDIOFlash){
+        return @"3(ATDeviceDIOFlash)";
+    }else if (type == ATDeviceDIOUnknown){
+        return @"0xFF(ATDeviceDIOUnknown)";
+    }
+    
+    return [NSString stringWithFormat:@"%d(ATDeviceDIOUnknown)",type];
+}
+
+-(void)show_log_uart:(NSString *)string{
+    [self show_log:string type:@"UART ####"];
+}
+-(void)show_log_debug:(NSString *)string{
+    [self show_log:string type:@"DEBUG ####"];
+}
+-(void)show_log:(NSString *)string type:(NSString *)type{
+    NSLog(@"%@",string);
+    
+    [ShowingLogVC postNotificationWithLog:string type:type];
+}
+
+-(NSString *)write_iOIndex_to_stirng:(NSInteger)iOIndex{
+    if (iOIndex == 8) {
+        return @"8(IN_GPIO)";
+    }else if (iOIndex == 9){
+        return @"9(OUT_GPIO)";
+    }else if (iOIndex == 10){
+        return @"10(UP_GPIO)";
+    }else if (iOIndex == 11){
+        return @"11(DOWN_GPIO)";
+    }else if (iOIndex == 12){
+        return @"12(elect_magnet)";
+    }else if (iOIndex == 13){
+        return @"13(FAN_IN_GPIO)";
+    }else if (iOIndex == 14){
+        return @"14(FAN_OUT_GPIO)";
+    }
+    
+    return [NSString stringWithFormat:@"%ld(Unknown)",(long)iOIndex];
+}
+
+//#define IN_GPIO                     8
+//#define OUT_GPIO                    9
+//#define UP_GPIO                     11
+//#define DOWN_GPIO                   10
+//#define elect_magnet                12
+//#define FAN_IN_GPIO                 13
+//#define FAN_OUT_GPIO                14
+-(BOOL)writeIO:(NSInteger)iOIndex value:(ATDeviceDIOType)value
+{
+    NSError * myError = nil;
+    NSString *stirng_iOIndex =[self write_iOIndex_to_stirng:iOIndex];
+    NSString *string_value = [self ATDeviceDIOType_to_stirng:value];
+    [self show_log_uart:[NSString stringWithFormat:@"writeDigitalOutput:%@ andIOType:%@",stirng_iOIndex,string_value]];
+    [eowyn writeDigitalOutput:iOIndex andValue:value andError:&myError];
+    
+    if(myError){
+        
+        [self show_log_debug:[NSString stringWithFormat:@"Error Failed to write I2C %@", [myError localizedDescription]]];
+        return NO;
+    }
+    return YES;
+}
+//#define UP_SENSOR                   0
+//#define DOWN_SENSOR                 1
+//#define IN_SENSOR                   2
+//#define OUT_SENSOR                  3
+//#define RESET_SENSOR                4
+//#define FAN_IN_SENSOR               5
+//#define FAN_OUT_SENSOR              6
+
+-(NSString *)read_iOIndex_to_stirng:(NSInteger)iOIndex{
+    if (iOIndex == 0) {
+        return @"0(UP_SENSOR)";
+    }else if (iOIndex == 1){
+        return @"1(DOWN_SENSOR)";
+    }else if (iOIndex == 2){
+        return @"2(IN_SENSOR)";
+    }else if (iOIndex == 3){
+        return @"3(OUT_SENSOR)";
+    }else if (iOIndex == 4){
+        return @"4(RESET_SENSOR)";
+    }else if (iOIndex == 5){
+        return @"5(FAN_IN_SENSOR)";
+    }else if (iOIndex == 6){
+        return @"6(FAN_OUT_SENSOR)";
+    }
+    
+    return [NSString stringWithFormat:@"%ld(Unknown)",(long)iOIndex];
+}
+-(ATDeviceDIOType)readIO:(NSInteger)iOIndex
+{
+    
+    @synchronized(self) {
+        
+        NSError * myError = nil;
+        NSString *stirng_iOIndex =[self read_iOIndex_to_stirng:iOIndex];
+        
+        ATDeviceDIOType iOType = [eowyn readDigitalInput:iOIndex andError:&myError];
+        NSString *string_value = [self ATDeviceDIOType_to_stirng:iOType];
+        [self show_log_uart:[NSString stringWithFormat:@"inputDigital:%@ readIOType:%@",stirng_iOIndex,string_value]];
+        
+        if(myError){
+            
+            [self show_log_debug:[NSString stringWithFormat:@"Error Failed to read I2C %@",[myError localizedDescription]]];
+            return ATDeviceDIOUnknown;
+            
+        }
+        
+        return iOType;
+        
+    }
+}
+
+-(ATDeviceDIOType)readIO:(NSInteger)iOIndex printLog:(BOOL)printLog{
+    NSError * myError = nil;
+    ATDeviceDIOType iOType = [eowyn readDigitalInput:iOIndex andError:&myError];
+    
+    if (printLog) {
+        NSString *stirng_iOIndex =[self read_iOIndex_to_stirng:iOIndex];
+        NSString *string_value = [self ATDeviceDIOType_to_stirng:iOType];
+        [self show_log_uart:[NSString stringWithFormat:@"inputDigital:%@ readIOType:%@",stirng_iOIndex,string_value]];
+    }
+
+    
+    if(myError){
+        
+        [self show_log_debug:[NSString stringWithFormat:@"Error Failed to read I2C %@",[myError localizedDescription]]];
+        return ATDeviceDIOUnknown;
+        
+    }
+    
+    return iOType;
+}
+
+
+-(ATDeviceDIOType)readDutIO:(NSInteger)iOIndex
+{
+    NSError * myError = nil;
+    ATDeviceDIOType iOType = [eowyn readDigitalInput:iOIndex andError:&myError];
+    NSString *string_value = [self ATDeviceDIOType_to_stirng:iOType];
+    [self show_log_uart:[NSString stringWithFormat:@"inputDigital:%ld readIOType:%@",(long)iOIndex,string_value]];
+    
+    if(myError){
+        
+        [self show_log_debug:[NSString stringWithFormat:@"Error Failed to read I2C %@",[myError localizedDescription]]];
+        return ATDeviceDIOUnknown;
+        
+    }
+    
+    return iOType;
+}
+
+-(ATDeviceDIOType)readDutIO:(NSInteger)iOIndex printLog:(BOOL)printLog
+{
+    NSError * myError = nil;
+    ATDeviceDIOType iOType = [eowyn readDigitalInput:iOIndex andError:&myError];
+    if (printLog) {
+        NSString *string_value = [self ATDeviceDIOType_to_stirng:iOType];
+        [self show_log_uart:[NSString stringWithFormat:@"inputDigital:%ld readIOType:%@",(long)iOIndex,string_value]];
+    }
+
+    
+    if(myError){
+        
+        [self show_log_debug:[NSString stringWithFormat:@"Error Failed to read I2C %@",[myError localizedDescription]]];
+        return ATDeviceDIOUnknown;
+        
+    }
+    
+    return iOType;
+}
+
+-(BOOL)writeI2C:(uint8_t *)writeData writeadd:(int)add writelen:(int)length busId:(int)busId{
+    NSError * myError = nil;
+    //    uint8_t i2cId = 1;
+    NSString *hex_string=@"0x";
+    hex_string = [hex_string stringByAppendingFormat:@"%02x",add];
+    [self show_log_uart:[NSString stringWithFormat:@"busId:%d writeI2C:%s address:%@",busId,writeData,hex_string]];
+    
+    [eowyn i2cTransferWithBusId:busId address:add >> 1 andWriteLen:length andReadLen:0 andData:(uint8_t*)writeData andError: &myError];
+    
+    if(myError){
+        
+        [self show_log_debug:[NSString stringWithFormat:@"Error Failed to write I2C %@", [myError localizedDescription]]];
+        return NO;
+    }
+    return YES;
+}
+
+
+-(BOOL)writeI2CWithString:(NSString *)writeString writeadd:(int)add writelen:(int)length busId:(int)busId{
+    NSError * myError = nil;
+    
+    NSString *hex_string=@"0x";
+    hex_string = [hex_string stringByAppendingFormat:@"%02x",add];
+    [self show_log_uart:[NSString stringWithFormat:@"writeI2C:%@ address:%@",writeString,hex_string]];
+    //change string to hex
+
+    const char *data = stringFromHexString(writeString);
+
+    [eowyn i2cTransferWithBusId:busId address:add >> 1 andWriteLen:3 andReadLen:0 andData:(uint8_t*)stringFromHexString(@"060000") andError: &myError];
+    
+    
+    [eowyn i2cTransferWithBusId:busId address:add >> 1 andWriteLen:length andReadLen:0 andData:(uint8_t*)data andError: &myError];
+    if(myError){
+        
+        [self show_log_debug:[NSString stringWithFormat:@"Error Failed to write I2C %@", [myError localizedDescription]]];
+        return NO;
+    }
+    return YES;
+}
+
+
+-(BOOL)writeI2C:(NSString *)writeData writeadd:(int)add writelen:(int)length
+{
+    NSError * myError = nil;
+    //    uint8_t i2cId = 1;
+    NSString *hex_string=@"0x";
+    hex_string = [hex_string stringByAppendingFormat:@"%02x",add];
+    [self show_log_uart:[NSString stringWithFormat:@"writeI2C:%@ address:%@",writeData,hex_string]];
+    //change string to hex
+    const char *data = stringFromHexString(writeData);
+    
+    [eowyn i2cTransferWithAddress: add >> 1
+                      andWriteLen: length
+                       andReadLen: 0
+                          andData: (uint8_t*)data
+                         andError: &myError];
+    
+    if(myError){
+        
+        [self show_log_debug:[NSString stringWithFormat:@"Error Failed to write I2C %@", [myError localizedDescription]]];
+        return NO;
+    }
+    return YES;
+}
+
+-(NSString *)getBinaryByHex:(NSString *)hex {
+    
+    NSMutableDictionary *hexDic = [[NSMutableDictionary alloc] initWithCapacity:16];
+    [hexDic setObject:@"0000" forKey:@"0"];
+    [hexDic setObject:@"0001" forKey:@"1"];
+    [hexDic setObject:@"0010" forKey:@"2"];
+    [hexDic setObject:@"0011" forKey:@"3"];
+    [hexDic setObject:@"0100" forKey:@"4"];
+    [hexDic setObject:@"0101" forKey:@"5"];
+    [hexDic setObject:@"0110" forKey:@"6"];
+    [hexDic setObject:@"0111" forKey:@"7"];
+    [hexDic setObject:@"1000" forKey:@"8"];
+    [hexDic setObject:@"1001" forKey:@"9"];
+    [hexDic setObject:@"1010" forKey:@"A"];
+    [hexDic setObject:@"1011" forKey:@"B"];
+    [hexDic setObject:@"1100" forKey:@"C"];
+    [hexDic setObject:@"1101" forKey:@"D"];
+    [hexDic setObject:@"1110" forKey:@"E"];
+    [hexDic setObject:@"1111" forKey:@"F"];
+    
+    
+    NSString *binary = @"";
+    
+    for (int i=0; i<[hex length]; i++) {
+        
+        NSString *key = [hex substringWithRange:NSMakeRange(i, 1)];
+        NSString *value = [hexDic objectForKey:key.uppercaseString];
+        if (value) {
+            
+            binary = [binary stringByAppendingString:value];
+        }
+    }
+    return binary;
+}
+
+
+-(unsigned char *)readI2C_arr:(int)readadd readlen:(int)len busId:(int)busId
+{
+    unsigned char readData[kBufferSize] = {0};
+    
+    NSError * myError = nil;
+    
+    [eowyn i2cTransferWithBusId:busId address:readadd >> 1 andWriteLen:3 andReadLen:0 andData:(uint8_t*)stringFromHexString(@"06ffff") andError: &myError];
+    
+    [eowyn i2cTransferWithBusId:busId address:readadd >> 1 andWriteLen:0 andReadLen:len andData:(uint8_t*)readData andError: &myError];
+    
+    if(myError){
+        [self show_log_debug:[NSString stringWithFormat:@"Error Failed to read I2C %@", [myError localizedDescription]]];
+         return NULL;
+        
+    }
+    unsigned char *read = readData;
+    return read;
+}
+
+-(int)readI2C:(int)readadd readlen:(int)len busId:(int)busId
+{
+    char readData[kBufferSize] = {0};
+    NSError * myError = nil;
+    
+    [eowyn i2cTransferWithBusId:busId address:readadd >> 1 andWriteLen:0 andReadLen:len andData:(uint8_t*)readData andError: &myError];
+    
+    if(myError){
+        [self show_log_debug:[NSString stringWithFormat:@"Error Failed to read I2C %@", [myError localizedDescription]]];
+        return -999;}
+    
+    return readData[1];
+}
+
+-(int)readI2C:(int)readadd readlen:(int)len
+{
+    char readData[kBufferSize] = {0};
+    NSError * myError = nil;
+    [eowyn i2cTransferWithAddress: readadd >> 1
+                      andWriteLen: 0
+                       andReadLen: len
+                          andData: (uint8_t*)readData
+                         andError: &myError];
+    
+    if(myError){
+        [self show_log_debug:[NSString stringWithFormat:@"Error Failed to read I2C %@", [myError localizedDescription]]];
+        return -999;}
+    
+    return readData[1];
+}
+
+-(int)readDUTI2C:(int)readadd readlen:(int)len
+{
+    char readData[kBufferSize] = {0};
+    NSError * myError = nil;
+    [eowyn i2cTransferWithAddress: readadd >> 1
+                      andWriteLen: 0
+                       andReadLen: len
+                          andData: (uint8_t*)readData
+                         andError: &myError];
+    
+    if(myError){
+        [self show_log_debug:[NSString stringWithFormat:@"Error Failed to read I2C %@", [myError localizedDescription]]];
+        
+        return -999;}
+    
+    
+    NSString *ret = [NSString stringWithFormat:@"%.2hhx",readData[1]];
+    NSMutableString *ret1 = [[NSMutableString alloc]init];
+    for (NSUInteger i=0; i<[ret length]; i++) {
+        NSRange range = NSMakeRange(i, 1);
+        NSString *str = [ret substringWithRange:range];
+        [ret1 appendString:[self getBinaryByHex:str]];
+    }
+    
+    NSMutableString *cmd = [[NSMutableString alloc]init];
+    int slot = 1;
+    for (NSUInteger i=[ret1 length]-2; i>=0; i-=2) {
+        NSRange range = NSMakeRange(i, 2);
+        NSString *str = [ret1 substringWithRange:range];
+        if([str containsString:@"1"]){
+            [cmd appendString:[NSString stringWithFormat:@"place:DUT%d NO;",slot]];
+        }else{
+            [cmd appendString:[NSString stringWithFormat:@"place:DUT%d OK;",slot]];
+        }
+        if(i==0){// NSUInteger的值无负数
+            break;
+        }
+        slot++;
+    }
+    [cmd appendString:@"DONE;"];
+    [self show_log_debug:[NSString stringWithFormat:@"%@",cmd]];
+    
+    
+    //    NSArray* array = [cmd componentsSeparatedByString:@";"];
+    //    for (int i=0; i<4; i++) {
+    //        if([array[i] containsString:@"OK"]){
+    //            NSLog(@"slot%d OK",i+1);
+    //        }else{
+    //            NSLog(@"slot%d NO",i+1);
+    //        }
+    //    }
+    
+    return readData[1];
+}
+//
+//-(float)readTempI2C:(int)readadd readlen:(int)len
+//{
+//    char readData[kBufferSize] = {0};
+//    NSError * myError = nil;
+//    uint8_t i2cId = 1;
+//
+//    [carbon i2cTransferWithBusId:i2cId
+//                         address:readadd >> 1//ADDR_24LC02's i2c address is 0xA0. Because I2C is 7 bit address, you need to shift 1 bit to right (0xA0 >> 1), before passing it to the API.
+//                     andWriteLen:0
+//                      andReadLen:len
+//                         andData:(uint8_t*)readData
+//                        andError:&myError];
+//
+//    if(myError){
+//        NSLog(@"Error Failed to read I2C %@", [myError localizedDescription]);
+//        return -999;
+//    }
+//
+//
+//    NSLog(@"READ:");
+//    NSLog(@"[0] 0x%x or %c",readData[0],readData[0]);
+//    NSLog(@"[1] 0x%x or %d",readData[1],readData[1]);
+////    NSLog(@"[2] 0x%x or %c",readData[2],readData[2]);
+////    NSLog(@"[3] 0x%x or %d",readData[3],readData[3]);
+////    NSLog(@"[4] 0x%x or %c",readData[4],readData[4]);
+////    NSLog(@"[5] 0x%x or %d",readData[5],readData[5]);
+////    NSLog(@"[6] 0x%x or %c",readData[6],readData[6]);
+////    NSLog(@"[7] 0x%x or %d",readData[7],readData[7]);
+////    NSLog(@"[8] 0x%x or %c",readData[8],readData[8]);
+////    NSLog(@"[9] 0x%x or %d",readData[9],readData[9]);
+////    NSLog(@"[10] 0x%x or %c",readData[10],readData[10]);
+////    NSLog(@"[11] 0x%x or %d",readData[11],readData[11]);
+////    NSLog(@"[12] 0x%x or %c",readData[12],readData[12]);
+////    NSLog(@"[13] 0x%x or %d",readData[13],readData[13]);
+////    NSLog(@"[14] 0x%x or %d",readData[14],readData[14]);
+////    NSLog(@"[15] 0x%x or %d",readData[15],readData[15]);
+////    NSLog(@"[16] 0x%x or %d",readData[16],readData[16]);
+////    NSLog(@"[17] 0x%x or %d",readData[17],readData[17]);
+//
+//    float temp0 = ((readData[0] << 5 )+ (readData[1] >> 3 )) * 0.0625;
+////    float temp1 = ((readData[2] << 5 )+ (readData[3] >> 3 )) * 0.0625;
+////    float temp2 = ((readData[4] << 5 )+ (readData[5] >> 3 )) * 0.0625;
+////    float temp3 = ((readData[6] << 5 )+ (readData[7] >> 3 )) * 0.0625;
+////    float temp4 = ((readData[8] << 5 )+ (readData[9] >> 3 )) * 0.0625;
+////    float temp5 = ((readData[10] << 5 )+ (readData[11] >> 3 )) * 0.0625;
+////    float temp6 = ((readData[12] << 5 )+ (readData[13] >> 3 )) * 0.0625;
+////    float temp7 = ((readData[14] << 5 )+ (readData[15] >> 3 )) * 0.0625;
+////    float temp8 = ((readData[16] << 5 )+ (readData[17] >> 3 )) * 0.0625;
+//    NSLog(@"%f",temp0);
+////    NSLog(@"%f",temp1);
+////    NSLog(@"%f",temp2);
+////    NSLog(@"%f",temp3);
+////    NSLog(@"%f",temp4);
+////    NSLog(@"%f",temp5);
+////    NSLog(@"%f",temp6);
+////    NSLog(@"%f",temp7);
+////    NSLog(@"%f",temp8);
+//
+//    return temp0;
+//}
+//
+-(int)readFanI2C:(int)readadd readlen:(int)len
+{
+    char readData[kBufferSize] = {0};
+    NSError * myError = nil;
+    //    uint8_t i2cId = 1;
+    
+    //    [eowyn i2cTransferWithBusId:i2cId
+    //                         address:readadd >> 1//ADDR_24LC02's i2c address is 0xA0. Because I2C is 7 bit address, you need to shift 1 bit to right (0xA0 >> 1), before passing it to the API.
+    //                     andWriteLen:0
+    //                      andReadLen:len
+    //                         andData:(uint8_t*)readData
+    //                        andError:&myError];
+    
+    [eowyn i2cTransferWithAddress: readadd >> 1
+                      andWriteLen: 0
+                       andReadLen: len
+                          andData: (uint8_t*)readData
+                         andError: &myError];
+    
+    if(myError){
+        [self show_log_debug:[NSString stringWithFormat:@"Error Failed to read I2C %@", [myError localizedDescription]]];
+        
+        return -999;}
+    
+    [self show_log_debug:@"READ:"];
+    [self show_log_debug:[NSString stringWithFormat:@"[0] 0x%x or %c",readData[0],readData[0]]];
+    
+    [self show_log_debug:[NSString stringWithFormat:@"[1] 0x%x or %d",readData[1],readData[1]]];
+    
+    //    NSLog(@"[2] 0x%x or %c",readData[2],readData[2]);
+    return readData[0];
+}
+void set_button_led(Eowyn * eowyn ,NSString* mode){
+    [eowyn writeI2C:@"01" writeadd:0x44 writelen:1];
+    unsigned char stat = [eowyn readI2C:0x44 readlen:2];
+    if ([mode isEqualToString:@"open"]){
+        stat = stat | 0x08;
+    }
+    else if ([mode isEqualToString:@"close"]){
+        stat = stat & 0xf7;
+    }
+    //    NSString *stat_string = [NSString stringWithFormat:@"%d",stat];
+    //    NSString *add = @"02";
+    //    unsigned long hex_stat = strtoul([add UTF8String],0,16) & strtoul([stat_string UTF8String],0,16);
+    NSString *command = [NSString stringWithFormat:@"02%02x",stat];
+    [eowyn writeI2C:command writeadd:0x44 writelen:2];
+    
+}
+void runFanRpm(Eowyn * eowyn){
+    
+    [eowyn writeI2C:@"0000" writeadd:0x58 writelen:2]; // Global Configuration
+    [eowyn readI2C:0x58 readlen:2];
+    
+    [eowyn writeI2C:@"01bb" writeadd:0x58 writelen:2]; //PWM Frequency config when power on
+    [eowyn readI2C:0x58 readlen:2];
+    
+    [eowyn writeI2C:@"02c8" writeadd:0x58 writelen:2]; //FAN1 Configuration
+    [eowyn readI2C:0x58 readlen:2];
+    [eowyn writeI2C:@"085e" writeadd:0x58 writelen:2]; //FAN1 Dynamics Configuration
+    [eowyn readI2C:0x58 readlen:2];
+    [eowyn writeI2C:@"501E" writeadd:0x58 writelen:2]; //FAN1 set speed
+    [eowyn readI2C:0x58 readlen:2];
+    [eowyn writeI2C:@"51A0" writeadd:0x58 writelen:2];
+    [eowyn readI2C:0x58 readlen:2];
+    
+    //    [eowyn writeI2C:@"03c8" writeadd:0x40 writelen:2]; //FAN2 Configuration
+    //    [eowyn readI2C:0x40 readlen:2];
+    //    [eowyn writeI2C:@"095e" writeadd:0x40 writelen:2]; //FAN2 Dynamics Configuration
+    //    [eowyn readI2C:0x40 readlen:2];
+    //    [eowyn writeI2C:@"521E" writeadd:0x40 writelen:2]; //FAN2 set speed
+    //    [eowyn readI2C:0x40 readlen:2];
+    //    [eowyn writeI2C:@"53A0" writeadd:0x40 writelen:2];
+    //    [eowyn readI2C:0x40 readlen:2];
+    //
+    //    [eowyn writeI2C:@"04c8" writeadd:0x40 writelen:2]; //FAN3 Configuration
+    //    [eowyn readI2C:0x40 readlen:2];
+    //    [eowyn writeI2C:@"0a5e" writeadd:0x40 writelen:2]; //FAN3 Dynamics Configuration
+    //    [eowyn readI2C:0x40 readlen:2];
+    //    [eowyn writeI2C:@"541E" writeadd:0x40 writelen:2]; //FAN3 set speed
+    //    [eowyn readI2C:0x40 readlen:2];
+    //    [eowyn writeI2C:@"55A0" writeadd:0x40 writelen:2];
+    //    [eowyn readI2C:0x40 readlen:2];
+    //
+    //    [eowyn writeI2C:@"05c8" writeadd:0x40 writelen:2]; //FAN4 Configuration
+    //    [eowyn readI2C:0x40 readlen:2];
+    //    [eowyn writeI2C:@"0b5e" writeadd:0x40 writelen:2]; //FAN4 Dynamics Configuration
+    //    [eowyn readI2C:0x40 readlen:2];
+    //    [eowyn writeI2C:@"561E" writeadd:0x40 writelen:2]; //FAN4 set speed
+    //    [eowyn readI2C:0x40 readlen:2];
+    //    [eowyn writeI2C:@"57A0" writeadd:0x40 writelen:2];
+    //    [eowyn readI2C:0x40 readlen:2];
+    //
+    //    [eowyn writeI2C:@"06c8" writeadd:0x40 writelen:2]; //FAN5 Configuration
+    //    [eowyn readI2C:0x40 readlen:2];
+    //    [eowyn writeI2C:@"0c5e" writeadd:0x40 writelen:2]; //FAN5 Dynamics Configuration
+    //    [eowyn readI2C:0x40 readlen:2];
+    //    [eowyn writeI2C:@"581E" writeadd:0x40 writelen:2]; //FAN5 set speed
+    //    [eowyn readI2C:0x40 readlen:2];
+    //    [eowyn writeI2C:@"59A0" writeadd:0x40 writelen:2];
+    //    [eowyn readI2C:0x40 readlen:2];
+    //
+    //    [eowyn writeI2C:@"07c8" writeadd:0x40 writelen:2]; //FAN6 Configuration
+    //    [eowyn readI2C:0x40 readlen:2];
+    //    [eowyn writeI2C:@"0d5e" writeadd:0x40 writelen:2]; //FAN6 Dynamics Configuration
+    //    [eowyn readI2C:0x40 readlen:2];
+    //    [eowyn writeI2C:@"5a1E" writeadd:0x40 writelen:2]; //FAN6 set speed
+    //    [eowyn readI2C:0x40 readlen:2];
+    //    [eowyn writeI2C:@"5bA0" writeadd:0x40 writelen:2];
+    //    [eowyn readI2C:0x40 readlen:2];
+    //
+    //    [eowyn writeI2C:@"0000" writeadd:0x44 writelen:2]; // Global Configuration
+    //    [eowyn readI2C:0x44 readlen:2];
+    //
+    //    [eowyn writeI2C:@"01bb" writeadd:0x44 writelen:2]; //PWM Frequency config when power on
+    //    [eowyn readI2C:0x44 readlen:2];
+    //
+    //    [eowyn writeI2C:@"02c8" writeadd:0x44 writelen:2]; //FAN7 Configuration
+    //    [eowyn readI2C:0x44 readlen:2];
+    //    [eowyn writeI2C:@"085e" writeadd:0x44 writelen:2]; //FAN7 Dynamics Configuration
+    //    [eowyn readI2C:0x44 readlen:2];
+    //    [eowyn writeI2C:@"501E" writeadd:0x44 writelen:2]; //FAN7 set speed
+    //    [eowyn readI2C:0x44 readlen:2];
+    //    [eowyn writeI2C:@"51A0" writeadd:0x44 writelen:2];
+    //    [eowyn readI2C:0x44 readlen:2];
+    
+}
+void resetled(Eowyn * eowyn){
+    
+    [eowyn writeI2C:@"02ffff" writeadd:0x42 writelen:3];
+    [eowyn writeI2C:@"020700" writeadd:0x44 writelen:3];
+    
+    [eowyn writeI2C:@"060000" writeadd:0x42 writelen:3];
+    [eowyn writeI2C:@"06f0ff" writeadd:0x44 writelen:3];
+    
+    //    int stat = [eowyn readI2C:0x44 readlen:1];
+    //    stat = stat & 0xf7;
+    //
+    //    NSString *command = [NSString stringWithFormat:@"02%.2x",stat];
+    //    [eowyn writeI2C:command writeadd:0x44 writelen:2];
+    //    [eowyn writeI2C:@"06" writeadd:0x44 writelen:1];
+    //    stat = [eowyn readI2C:0x44 readlen:1];
+    //    stat = stat & 0xf7;
+    //    command = [NSString stringWithFormat:@"06%.2x",stat];
+    //    [eowyn writeI2C:command writeadd:0x44 writelen:2];
+    
+    
+}
+BOOL check_timeout(Eowyn * eowyn ,int iOIndex,int stat,int timeout){
+    uint32 start = [[NSDate date]timeIntervalSince1970];
+    while (true) {
+        ATDeviceDIOType io_stat = [eowyn readIO:iOIndex];
+        if (io_stat == stat){
+            return YES;
+        }
+        uint32 end = [[NSDate date]timeIntervalSince1970];
+        if (end - start > timeout){
+            return NO;
+        }
+    }
+}
+
+void uut1led(Eowyn * eowyn,NSString* mode){
+    
+    [eowyn writeI2C:@"02" writeadd:0x42 writelen:1];
+    unsigned char stat_1 = [eowyn readI2C:0x42 readlen:2];
+    [eowyn writeI2C:@"01" writeadd:0x44 writelen:1];
+    unsigned char stat_2 = [eowyn readI2C:0x44 readlen:2];
+    
+    if([mode isEqualToString:@"ready"]){                    //blue
+        stat_1 = (stat_1 & 0xf1) + 0x06;
+        stat_2 = stat_2 | 0x04;
+        
+    }else if([mode isEqualToString:@"idle"]){               //yellow
+        stat_1 = stat_1 | 0x0e;
+        stat_2 = stat_2 & 0xfb;
+        
+    }else if([mode isEqualToString:@"pass"]){               //green
+        stat_1 = (stat_1 & 0xf1) + 0x0a;
+        stat_2 = stat_2 | 0x04;
+        
+    }else if ([mode isEqualToString:@"fail"]){              //red
+        stat_1 = (stat_1 & 0xf1) + 0x0c;
+        stat_2 = stat_2 | 0x04;
+        
+    }else if ([mode isEqualToString:@"init"]){              //init
+        stat_1 = stat_1 | 0x0e;
+        stat_2 = stat_2 | 0x04;
+        
+    }else{
+        show_log(@"Error Mode!");
+        return;
+    }
+    
+    NSString *x42_cmd = [NSString stringWithFormat:@"03%02x",stat_1];
+    NSString *x44_cmd = [NSString stringWithFormat:@"02%02x",stat_2];
+    show_log([NSString stringWithFormat:@"uut1led ledRecord_x42 %@",x42_cmd]);
+    show_log([NSString stringWithFormat:@"uut1led ledRecord_x44 %@",x44_cmd]);
+    [eowyn writeI2C:x42_cmd writeadd:0x42 writelen:2];
+    [eowyn writeI2C:x44_cmd writeadd:0x44 writelen:2];
+}
+
+
+void uut4led(Eowyn * eowyn,NSString* mode){                       //actually UUT2
+    
+    [eowyn writeI2C:@"01" writeadd:0x42 writelen:1];
+    unsigned char stat_1 = [eowyn readI2C:0x42 readlen:2];
+    [eowyn writeI2C:@"02" writeadd:0x42 writelen:1];
+    unsigned char stat_2 = [eowyn readI2C:0x42 readlen:2];
+    //    int stat = 0;
+    //    NSString * x42_set = nil;
+    //    NSString * x44_set = nil;
+    
+    if([mode isEqualToString:@"ready"]){                    //blue
+        stat_1 = (stat_1 & 0xf8) + 0x03;
+        stat_2 = stat_2 | 0x80;
+        
+        //        x42_set = @"02dfff";
+        //        x44_set = @"02ffff";
+        
+    }else if([mode isEqualToString:@"idle"]){               //yellow
+        stat_1 = stat_1 | 0x07;
+        stat_2 = stat_2 & 0x7f;
+        //        x42_set = @"02ffff";
+        //        x44_set = @"02feff";
+    }else if([mode isEqualToString:@"pass"]){               //green
+        stat_1 = (stat_1 & 0xf8) + 0x05;
+        stat_2 = stat_2 | 0x80;
+        //        x42_set = @"02efff";
+        //        x44_set = @"02ffff";
+    }else if ([mode isEqualToString:@"fail"]){              //red
+        stat_1 = (stat_1 & 0xf8) + 0x06;
+        stat_2 = stat_2 | 0x80;
+        //        x42_set = @"02f7ff";
+        //        x44_set = @"02ffff";
+    }else if ([mode isEqualToString:@"init"]){              //init
+        stat_1 = stat_1 | 0x07;
+        stat_2 = stat_2 | 0x80;
+        
+        //        ledRecord_x42 = [NSMutableString stringWithString:@"ffffffff"];
+        //        ledRecord_x44 = [NSMutableString stringWithString:@"ffffffff"];
+        //        x42_set = @"02ffff";
+        //        x44_set = @"02ffff";
+    }else{
+        
+        show_log(@"Error Mode!");
+        return;
+    }
+    NSString *x42_cmd = [NSString stringWithFormat:@"02%02x%02x",stat_1,stat_2];
+    show_log([NSString stringWithFormat:@"uut4led ledRecord_x42 %@",x42_cmd]);
+    [eowyn writeI2C:x42_cmd writeadd:0x42 writelen:3];
+}
+
+void uut3led(Eowyn * eowyn,NSString* mode){                   //actually UUT3
+    
+    [eowyn writeI2C:@"01" writeadd:0x42 writelen:1];
+    unsigned char stat_1 = [eowyn readI2C:0x42 readlen:2];
+    [eowyn writeI2C:@"01" writeadd:0x44 writelen:1];
+    unsigned char stat_2 = [eowyn readI2C:0x44 readlen:2];
+    
+    
+    if([mode isEqualToString:@"ready"]){                    //blue
+        stat_1 = (stat_1 & 0xc7) + 0x18;
+        stat_2 = stat_2 | 0x01;
+        
+        
+    }else if([mode isEqualToString:@"idle"]){               //yellow
+        stat_1 = stat_1 | 0x38;
+        stat_2 = stat_2 & 0xfe;
+        
+    }else if([mode isEqualToString:@"pass"]){               //green
+        stat_1 = (stat_1 & 0xc7) + 0x28;
+        stat_2 = stat_2 | 0x01;
+        
+    }else if ([mode isEqualToString:@"fail"]){              //red
+        stat_1 = (stat_1 & 0xc7) + 0x30;
+        stat_2 = stat_2 | 0x01;
+        
+    }else if ([mode isEqualToString:@"init"]){              //init
+        stat_1 = stat_1 | 0x38;
+        stat_2 = stat_2 | 0x01;
+        
+    }else{
+        show_log(@"Error Mode!");
+        return;
+    }
+    
+    NSString *x42_cmd = [NSString stringWithFormat:@"02%02x",stat_1];
+    NSString *x44_cmd = [NSString stringWithFormat:@"02%02x",stat_2];
+    
+    show_log([NSString stringWithFormat:@"uut3led ledRecord_x42 %@",x42_cmd]);
+    show_log([NSString stringWithFormat:@"uut3led ledRecord_x44 %@",x44_cmd]);
+    
+    [eowyn writeI2C:x42_cmd writeadd:0x42 writelen:2];
+    [eowyn writeI2C:x44_cmd writeadd:0x44 writelen:2];
+    
+    
+}
+
+void uut2led(Eowyn * eowyn,NSString* mode){
+    
+    [eowyn writeI2C:@"01" writeadd:0x42 writelen:1];
+    unsigned char stat_1 = [eowyn readI2C:0x42 readlen:2];
+    [eowyn writeI2C:@"02" writeadd:0x42 writelen:1];
+    unsigned char stat_2 = [eowyn readI2C:0x42 readlen:2];
+    [eowyn writeI2C:@"01" writeadd:0x44 writelen:1];
+    unsigned char stat_3 = [eowyn readI2C:0x44 readlen:2];
+    
+    
+    if([mode isEqualToString:@"ready"]){                    //blue
+        stat_1 = stat_1 | 0xc0;
+        stat_2 = stat_2 & 0xfe;
+        stat_3 = stat_3 | 0x02;
+        
+        
+    }else if([mode isEqualToString:@"idle"]){               //yellow
+        stat_1 = stat_1 | 0xc0;
+        stat_2 = stat_2 | 0x01;
+        stat_3 = stat_3 & 0xfd;
+        
+    }else if([mode isEqualToString:@"pass"]){               //green
+        stat_1 = (stat_1 & 0x3f) + 0x40;
+        stat_2 = stat_2 | 0x01;
+        stat_3 = stat_3 | 0x02;
+        
+    }else if ([mode isEqualToString:@"fail"]){              //red
+        stat_1 = (stat_1 & 0x3f) + 0x80;
+        stat_2 = stat_2 | 0x01;
+        stat_3 = stat_3 | 0x02;
+        
+    }else if ([mode isEqualToString:@"init"]){              //init
+        stat_1 = stat_1 | 0xc0;
+        stat_2 = stat_2 | 0x01;
+        stat_3 = stat_3 | 0x02;
+        
+    }else{
+        
+        show_log(@"Error Mode!");
+        return;
+    }
+    
+    NSString *x42_cmd = [NSString stringWithFormat:@"02%02x%02x",stat_1,stat_2];
+    NSString *x44_cmd = [NSString stringWithFormat:@"02%02x",stat_3];
+    
+    show_log([NSString stringWithFormat:@"uut2led ledRecord_x42 %@",x42_cmd]);
+    show_log([NSString stringWithFormat:@"uut2led ledRecord_x44 %@",x44_cmd]);
+    
+    [eowyn writeI2C:x42_cmd writeadd:0x42 writelen:3];
+    [eowyn writeI2C:x44_cmd writeadd:0x44 writelen:2];
+}
+@end

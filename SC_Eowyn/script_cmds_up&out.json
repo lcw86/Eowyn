@@ -1,0 +1,13 @@
+{
+    "commands":[
+        "up",
+        "out",
+ 
+    ],
+   
+    "parameters":{
+        "loopTimes":"1",
+        "commandDelay":"0.5",
+
+    }
+}
