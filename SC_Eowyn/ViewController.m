@@ -192,7 +192,7 @@ BOOL isConnect = NO;
         self.btnRed.enabled=isEnable;
         self.btnBlue.enabled=isEnable;
         self.btnReset.enabled=isEnable;
-        self.btnGreen.enabled=isEnable;
+        //self.btnGreen.enabled=isEnable;
         self.btnSend.enabled=isEnable;
         
         self.btnConnect.enabled=!isEnable;
