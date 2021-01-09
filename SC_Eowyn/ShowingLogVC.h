@@ -12,6 +12,7 @@ NS_ASSUME_NONNULL_BEGIN
 
 @interface ShowingLogVC : NSViewController
 +(void)postNotificationWithLog:(NSString *)log type:(NSString *)type;
+//-(void)showLog:(NSString *)log type:(NSString *)type;
 @end
 
 NS_ASSUME_NONNULL_END

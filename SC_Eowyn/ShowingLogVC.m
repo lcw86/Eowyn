@@ -44,6 +44,24 @@
 }
 
 
+-(void)postNotificationWithLog:(NSString *)log type:(NSString *)type{
+    NSMutableDictionary *dic = [NSMutableDictionary dictionary];
+    [dic setObject:log forKey:@"log"];
+    [dic setObject:type forKey:@"type"];
+    [[NSNotificationCenter defaultCenter] postNotificationName:@"ShowingLogVCWillPrintLog" object:nil userInfo:dic];
+}
+
+-(void)showLog:(NSString *)log type:(NSString *)type
+{
+
+    NSString *timeString = [NSString cw_stringFromCurrentDateTimeWithMicrosecond];
+    [self.mutLogString appendString:[NSString stringWithFormat:@"%@ %@ %@\n",timeString,type,log]];
+    dispatch_async(dispatch_get_main_queue(), ^{
+        self.logTextView.string = self.mutLogString;
+        [self.logTextView scrollRangeToVisible:NSMakeRange(self.logTextView.string.length, 1)];
+    });
+}
+
 -(void)showLog:(NSNotification *)notification
 {
     NSDictionary *dic = [notification userInfo];

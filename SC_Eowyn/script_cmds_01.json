@@ -5,6 +5,11 @@
         "in",
         "down",
         
-    ]
+    ],
     
+    "parameters":{
+        "loopTimes":"1",
+        "commandDelay":"0.5",
+
+    }
 }

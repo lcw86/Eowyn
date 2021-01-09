@@ -212,7 +212,7 @@ const char* stringFromHexString(NSString *hexString)
 -(void)show_log:(NSString *)string type:(NSString *)type{
     NSLog(@"%@",string);
     
-    [ShowingLogVC postNotificationWithLog:string type:type];
+    //[ShowingLogVC postNotificationWithLog:string type:type];
 }
 
 -(NSString *)write_iOIndex_to_stirng:(NSInteger)iOIndex{
@@ -407,7 +407,16 @@ const char* stringFromHexString(NSString *hexString)
     return YES;
 }
 
+-(BOOL) setEowynIPAddressWithIPString:(NSString *)ipAddress andError:(NSError **)aError{
+    
+    return [eowyn setIPAddressWithIPString:ipAddress andError:aError];
+}
 
+-(BOOL) setEowynNetMaskWithIPString:(NSString *)netMask andError:(NSError **)aError{
+    
+    
+    return [eowyn setNetMaskWithIPString:netMask andError:aError];
+}
 -(BOOL)writeI2C:(NSString *)writeData writeadd:(int)add writelen:(int)length
 {
     NSError * myError = nil;
@@ -983,4 +992,131 @@ void uut2led(Eowyn * eowyn,NSString* mode){
     [eowyn writeI2C:x42_cmd writeadd:0x42 writelen:3];
     [eowyn writeI2C:x44_cmd writeadd:0x44 writelen:2];
 }
+
+//-(NSString *)getBinaryByHex:(NSString *)hex {
+//
+//    NSMutableDictionary *hexDic = [[NSMutableDictionary alloc] initWithCapacity:16];
+//    [hexDic setObject:@"0000" forKey:@"0"];
+//    [hexDic setObject:@"0001" forKey:@"1"];
+//    [hexDic setObject:@"0010" forKey:@"2"];
+//    [hexDic setObject:@"0011" forKey:@"3"];
+//    [hexDic setObject:@"0100" forKey:@"4"];
+//    [hexDic setObject:@"0101" forKey:@"5"];
+//    [hexDic setObject:@"0110" forKey:@"6"];
+//    [hexDic setObject:@"0111" forKey:@"7"];
+//    [hexDic setObject:@"1000" forKey:@"8"];
+//    [hexDic setObject:@"1001" forKey:@"9"];
+//    [hexDic setObject:@"1010" forKey:@"A"];
+//    [hexDic setObject:@"1011" forKey:@"B"];
+//    [hexDic setObject:@"1100" forKey:@"C"];
+//    [hexDic setObject:@"1101" forKey:@"D"];
+//    [hexDic setObject:@"1110" forKey:@"E"];
+//    [hexDic setObject:@"1111" forKey:@"F"];
+//
+//
+//    NSString *binary = @"";
+//
+//    for (int i=0; i<[hex length]; i++) {
+//
+//        NSString *key = [hex substringWithRange:NSMakeRange(i, 1)];
+//        NSString *value = [hexDic objectForKey:key.uppercaseString];
+//        if (value) {
+//
+//            binary = [binary stringByAppendingString:value];
+//        }
+//    }
+//    return binary;
+//}
+
+
+- (NSString *)getHexByBinary:(NSString *)binary {
+    
+    
+    NSMutableDictionary *binaryDic = [[NSMutableDictionary alloc] initWithCapacity:16];
+    [binaryDic setObject:@"0" forKey:@"0000"];
+    [binaryDic setObject:@"1" forKey:@"0001"];
+    [binaryDic setObject:@"2" forKey:@"0010"];
+    [binaryDic setObject:@"3" forKey:@"0011"];
+    [binaryDic setObject:@"4" forKey:@"0100"];
+    [binaryDic setObject:@"5" forKey:@"0101"];
+    [binaryDic setObject:@"6" forKey:@"0110"];
+    [binaryDic setObject:@"7" forKey:@"0111"];
+    [binaryDic setObject:@"8" forKey:@"1000"];
+    [binaryDic setObject:@"9" forKey:@"1001"];
+    [binaryDic setObject:@"A" forKey:@"1010"];
+    [binaryDic setObject:@"B" forKey:@"1011"];
+    [binaryDic setObject:@"C" forKey:@"1100"];
+    [binaryDic setObject:@"D" forKey:@"1101"];
+    [binaryDic setObject:@"E" forKey:@"1110"];
+    [binaryDic setObject:@"F" forKey:@"1111"];
+    
+    if (binary.length % 4 != 0) {
+        
+        NSMutableString *mStr = [[NSMutableString alloc]init];;
+        for (int i = 0; i < 4 - binary.length % 4; i++) {
+            
+            [mStr appendString:@"0"];
+        }
+        binary = [mStr stringByAppendingString:binary];
+    }
+    NSString *hex = @"";
+    for (int i=0; i<binary.length; i+=4) {
+        
+        NSString *key = [binary substringWithRange:NSMakeRange(i, 4)];
+        NSString *value = [binaryDic objectForKey:key];
+        if (value) {
+            
+            hex = [hex stringByAppendingString:value];
+        }
+    }
+    return hex;
+    
+}
+
+-(NSString *)charToString:(char )hex_char{
+    
+    NSString *mut_hex = [NSString stringWithFormat:@"%02x",hex_char];
+    NSString *hex = @"";
+    if (mut_hex.length==8 && [mut_hex containsString:@"ffffff"]) {
+        hex=[mut_hex stringByReplacingOccurrencesOfString:@"ffffff" withString:@""];
+    }
+    return hex;
+}
+
+-(NSString *)readI2C_STR:(int)readadd readlen:(int)len busId:(int)busId
+{
+    unsigned char readData[kBufferSize] = {0};
+    NSString *current_low_state;
+    NSString *current_high_state;
+    NSMutableString *Value = [[NSMutableString alloc] init];
+    NSError * myError = nil;
+    
+    //        [eowyn i2cTransferWithBusId:busId address:readadd >> 1 andWriteLen:3 andReadLen:0 andData:(uint8_t*)stringFromHexString(@"06ffff") andError: &myError];
+    
+    [eowyn i2cTransferWithBusId:busId address:readadd >> 1 andWriteLen:0 andReadLen:len andData:(uint8_t*)readData andError: &myError];
+    
+    if(myError){
+        //        [self show_log_debug:[NSString stringWithFormat:@"Error Failed to read I2C %@", [myError localizedDescription]]];
+        return NULL;
+        
+    }
+    unsigned char *read = readData;
+    
+    unsigned char stat_low = read[0];//low byte
+    unsigned char stat_high = read[1];//high byte
+    current_low_state = [self charToString:stat_low];
+    current_high_state = [self charToString:stat_high];
+    NSString *binary_low= [self getBinaryByHex:current_low_state];
+    NSString *binary_high= [self getBinaryByHex:current_high_state];
+    //            Value = [binary_low stringByAppendingString:binary_high];
+    NSString *low_state = [self getHexByBinary:binary_low];
+    NSString *high_state = [self getHexByBinary:binary_high];
+                                 
+    [Value appendString:low_state];
+    [Value appendString:high_state];
+    NSLog(@"readI2C_STR====%@",Value);
+    return Value;
+}
+
+
 @end

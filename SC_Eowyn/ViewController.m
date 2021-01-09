@@ -13,6 +13,9 @@
 #import <CWGeneralManager/NSString+Extension.h>
 #import <CWGeneralManager/CWFileManager.h>
 
+#import <pthread.h>
+//#import <thread>
+
 #define ADDR_24LC02        0xA0 >> 1  //0xA0 = Write address and 0xA1 is the read address.
 #define I2C_SPEED               100000
 #define I2C_SLAVE_ADDRESS7      0x30 >> 1
@@ -47,22 +50,28 @@ NSInteger UP_DOWN_SENSOR_OFF=0;
 NSInteger FAN_IN_OUT_SENSOR_ON=1;
 NSInteger FAN_IN_OUT_SENSOR_OFF=0;
 
+NSString *low_state_binary;
+NSString *high_state_binary;
 
 int IN_STATE=1;
 int OUT_STATE=2;
 int DOWN_STATE=3;
 int UNREADY_STATE=4;
 
-int DUT1_STATE = 4;
-int DUT2_STATE = 5;
-int DUT3_STATE = 6;
-int DUT4_STATE = 7;
-NSString *Default_IP=@"192.168.100.12";
-NSString *FCT_IP=@"169.254.1.20";
-NSString *DFU_IP=@"10.0.200.177";
+int DUT1_STATE = 5;
+int DUT2_STATE = 6;
+int DUT3_STATE = 7;
+int DUT4_STATE = 8;
+BOOL StopLoop;
+
+int Eowyn_Count = 1;
+//NSString *Default_IP=@"192.168.100.12";
+NSString *eowyn_IP=@"169.254.1.20";
+NSString *AllowSetIps=@"169.254.1.20;169.254.1.21;169.254.1.22;169.254.1.23;169.254.1.24;169.254.1.25;169.254.1.26;169.254.1.27;169.254.1.28;169.254.1.29";
+//NSString *DFU_IP=@"10.0.200.177";
 
 BOOL sign = YES;
-BOOL isConnect = NO;
+
 @interface ViewController ()
 @property (weak) IBOutlet NSButton *btnConnect;
 @property (weak) IBOutlet NSButton *btnDisConnect;
@@ -87,6 +96,7 @@ BOOL isConnect = NO;
 //@property (weak) IBOutlet NSPopUpButton *popBtnLedCorlor;
 
 @property (weak) IBOutlet NSPopUpButton *popBtnLedType;
+@property (strong) IBOutlet NSPopUpButton *DOut;
 
 //@property (weak) IBOutlet NSButton *btn_send_led;
 
@@ -107,17 +117,26 @@ BOOL isConnect = NO;
 @property (weak) IBOutlet NSButton *btnDOWN;
 @property (weak) IBOutlet NSButton *btnIN_DOWN;
 @property (weak) IBOutlet NSButton *btnRed;
+
 @property (weak) IBOutlet NSButton *btnBlue;
 @property (weak) IBOutlet NSButton *btnReset;
 @property (weak) IBOutlet NSButton *btnGreen;
-
+@property (strong) IBOutlet NSProgressIndicator *LoopSignal;
+@property (weak) IBOutlet NSButton *btnYellow;
 @property (weak) IBOutlet NSTextField *addWriteView;
 @property (weak) IBOutlet NSTextField *cmdWriteView;
 @property (weak) IBOutlet NSTextField *busIdView;
-@property (weak) IBOutlet NSButton *debugSend;
+@property (strong) IBOutlet NSTextField *DOut_Value;
 
-@property (weak) IBOutlet NSTextField *delayView;
-@property (weak) IBOutlet NSTextField *loopView;
+@property (strong) IBOutlet NSTextField *LoopT;
+@property (strong) IBOutlet NSTextField *Delay_Time;
+@property (strong) IBOutlet NSTextField *CurrentTime;
+
+@property (weak) IBOutlet NSButton *factoryIpBtn;
+@property (weak) IBOutlet NSPopUpButton *setIpPopBtn;
+
+@property (weak) IBOutlet NSButton *DigitalOut_ON;
+@property (weak) IBOutlet NSButton *DigitalOut_OFF;
 
 @end
 
@@ -126,7 +145,7 @@ BOOL isConnect = NO;
     NSMutableString * ledRecord_x42;
     NSMutableString * ledRecord_x44;
     NSMutableString * cylinderRecord;
-    
+    NSThread * threadLoop;
     Eowyn *eowyn;
     BOOL is_stop;
     BOOL is_run_scipt_stop;
@@ -137,7 +156,8 @@ BOOL isConnect = NO;
     BOOL isPingSuccess;
     BOOL exitPing;
     BOOL isDebug;
-  
+    BOOL isConnect;
+    NSString *connectingIp;
     
 }
 
@@ -146,10 +166,31 @@ BOOL isConnect = NO;
     [popBtn removeAllItems];
     [popBtn addItemsWithTitles:titles];
 }
+//NSString *Default_IP=@"192.168.100.12";
+//NSString *FCT_IP=@"169.254.1.20";
+//NSString *DFU_IP=@"10.0.200.177";
+-(void)setDefaultIp{
+ 
+ 
+    int titleIndex = [[self.title substringFromIndex:2] intValue];
+    NSArray *eowynIpArr =[eowyn_IP componentsSeparatedByString:@"."];
+    if (eowynIpArr.count == 4) {
+        int eowyn_IP_last = [[eowynIpArr lastObject] intValue];
+        //    int FCT_IP_last = [[[FCT_IP componentsSeparatedByString:@"."] lastObject] intValue];
+        //    int DFU_IP_last = [[[DFU_IP componentsSeparatedByString:@"."] lastObject] intValue];
+        eowyn_IP = [NSString stringWithFormat:@"%@.%@.%@.%d",eowynIpArr[0],eowynIpArr[1],eowynIpArr[2],eowyn_IP_last+titleIndex-1];
+        //    FCT_IP = [NSString stringWithFormat:@"169.254.1.%d",FCT_IP_last+titleIndex-1];
+        //    DFU_IP = [NSString stringWithFormat:@"10.0.200.%d",DFU_IP_last+titleIndex-1];
+        //    FCT_IP=@"169.254.1.20";
+        //    DFU_IP=@"10.0.200.177";
+    }
+
+}
+
 
 - (void)viewDidLoad {
     [super viewDidLoad];
-//    isDebug=1;
+    isDebug=NO;
 
 //    char add = [self cw_stringToHex:@"0x42"];
 
@@ -159,29 +200,75 @@ BOOL isConnect = NO;
     // Do view setup here.
     //[self addItemsWithTitles:@[@"FCT Test",@"DFU Test"] popBtn:self.popTestType];
 //    [self addItemsWithTitles:@[@"FCT Test"] popBtn:self.popTestType];
-    [self addItemsWithTitles:@[FCT_IP,Default_IP] popBtn:self.popTestType];
+    [self setDefaultIp];
+    
+//
+    
     [self addItemsWithTitles: @[@"IN",@"OUT",@"DOWN",@"UP",@"CHECK CURRENT POSITION",@"CHECK DUT STATE",@"READ TEMPERATURE",@"READ FAN SPEED",@"RUN FAN RPM",@"ELECT_MAGNET ON",@"ELECT_MAGNET OFF",@"CHECK LED",@"CHECK RESET BUTTON",@"FAN MOVE IN",@"FAN MOVE OUT",@"LED TEST1"] popBtn:self.popDebug];
     
     [self addItemsWithTitles:@[@"UUT1",@"UUT2",@"UUT3",@"UUT4",@"Fixture"] popBtn:self.popBtnLedType];
+    [self addItemsWithTitles:@[@"Megnet",@"IN",@"OUT",@"UP",@"DOWN",@"NONE"] popBtn:self.DOut];
+//    [self addItemsWithTitles:[self getSetIpAddrs] popBtn:self.popTestType];
+    if (Eowyn_Count == 1) {
+        [self addItemsWithTitles:@[@"169.254.1.20",@"192.168.100.12"] popBtn:self.popTestType];
+        [self addItemsWithTitles:@[@"169.254.1.20"] popBtn:self.setIpPopBtn];
     
+    }else{//[self getSetIpAddrs]
+//        NSMutableArray *arr = [self getSetIpAddrs];
+//        [arr removeObject:eowyn_IP];
+        if ([self.title containsString:[NSString stringWithFormat:@"%d",Eowyn_Count]]) {
+            [self addItemsWithTitles:[self getSetIpAddrs] popBtn:self.popTestType];
+            [self addItemsWithTitles:[self getSetIpAddrs] popBtn:self.setIpPopBtn];
+        }else{
+            [self addItemsWithTitles:@[eowyn_IP] popBtn:self.popTestType];
+            [self addItemsWithTitles:@[@"169.254.1.20"] popBtn:self.setIpPopBtn];
+        }
+
+    }
+//
+
     [self.popBtnScript removeAllItems];
     [self.popBtnScript addItemsWithTitles:[self getScriptPathList]];
     
     [self enableBtns:NO];
+    self.popTestType.enabled = YES;
 
     self.btnConnect.enabled = NO;
+    connectingIp = self.popTestType.title;
+    if (Eowyn_Count == 1) {
+        self.btnConnect.hidden = YES;
+        self.btnDisConnect.hidden = YES;
+//        NSString *ip = self.popTestType.title;
+        [self setPingIpAddress:connectingIp];
+    }
     
 //    NSString *ip = isDebug ?@"14.215.177.39":FCT_IP;
-    NSString *ip = self.popTestType.title;
-    [self setPingIpAddress:ip];
+
+    
+}
+
+-(NSMutableArray *)getSetIpAddrs{
+    
+    NSArray *ips = [AllowSetIps componentsSeparatedByString:@";"];
+    NSMutableArray *mut_arr = [[NSMutableArray alloc]initWithArray:ips];
+
+    return mut_arr;
+}
+
+
+- (IBAction)clickIpPopBtn:(NSPopUpButton *)btn {
+    connectingIp = btn.title;
+    if (Eowyn_Count == 1) {
+        exitPing = YES;
+        [NSThread sleepForTimeInterval:2];
+        exitPing =NO;
+        [self setPingIpAddress:btn.title];
+    }
     
 }
 
 
 -(void)enableBtns:(BOOL)isEnable{
-    if (isDebug) {
-        return;
-    }
     dispatch_async(dispatch_get_main_queue(), ^{
         self.btnIN.enabled=isEnable;
         self.btnUP.enabled=isEnable;
@@ -192,30 +279,47 @@ BOOL isConnect = NO;
         self.btnRed.enabled=isEnable;
         self.btnBlue.enabled=isEnable;
         self.btnReset.enabled=isEnable;
-        //self.btnGreen.enabled=isEnable;
+        self.btnGreen.enabled=isEnable;
         self.btnSend.enabled=isEnable;
-        
+    
+        self.btnYellow.enabled = isEnable;
         self.btnConnect.enabled=!isEnable;
         self.btnDisConnect.enabled=isEnable;
 
         self.btn_loopStop.enabled=isEnable;
         self.btn_loopStart.enabled=isEnable;
+        self.DigitalOut_ON.enabled = isEnable;
+        self.DigitalOut_OFF.enabled = isEnable;
+        
         self.btn_scriptStart.enabled=isEnable;
         self.btn_scriptStop.enabled=isEnable;
-   
-        self.debugSend.enabled = isEnable;
-        
+        self.factoryIpBtn.enabled = isEnable;
         self.popTestType.enabled = !isEnable;
+        
       
     });
 
 }
-
-
-
-
--(void)setPingIpAddress:(NSString *)ip{
+- (IBAction)clickFactoryIP:(NSButton *)btn {
+    NSError * myError = nil;
     
+    BOOL isSucess = [eowyn setEowynIPAddressWithIPString:self.setIpPopBtn.title andError:&myError];
+    
+    if (isSucess) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [MyEexception RemindException:@"" Information:@"Set Factory IP successful.Please reboot the fixture"];
+        });
+    }else{
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [MyEexception RemindException:@"Error" Information:[NSString stringWithFormat:@"Set Factory IP Fail.Error Info:%@",[myError localizedDescription]]];
+        });
+    }
+    
+}
+-(void)setPingIpAddress:(NSString *)ip{
+//    if ([self.title containsString:@"1"]) {
+//        return;
+//    }
     NSString *ip_address = [NSString stringWithFormat:@"ping %@",ip];
     dispatch_async(dispatch_get_global_queue(0, 0), ^{
         NSTask *task = [[NSTask alloc] init];
@@ -228,8 +332,9 @@ BOOL isConnect = NO;
         [task setStandardOutput: nsreadPipe];
         [task launch];
         
+    
         int errorcount =0;
-//        int errorcount =0;
+
         while (!exitPing)
         {
             [NSThread sleepForTimeInterval:0.5];
@@ -238,7 +343,8 @@ BOOL isConnect = NO;
                 NSString *reply = [[NSString alloc] initWithData:readData encoding:NSUTF8StringEncoding];
                 
                 if (!isConnect) {
-                    [ShowingLogVC postNotificationWithLog:reply type:@""];
+                    show_log(reply);
+                    
                 }
                 
                 if ([reply containsString:@"icmp_seq="] &&[reply containsString:@"ttl="]) {
@@ -274,9 +380,6 @@ BOOL isConnect = NO;
 }
 
 
-
-
-
 - (IBAction)clickDisConnect:(NSButton *)sender {
     
     if (!eowyn || !isConnect) {
@@ -306,17 +409,6 @@ BOOL isConnect = NO;
 
 }
 
-
-- (IBAction)clickIpPopBtn:(NSPopUpButton *)btn {
-
-    exitPing = YES;
-    [NSThread sleepForTimeInterval:2];
-    exitPing =NO;
-    [self setPingIpAddress:btn.title];
-    
-}
-
-
 -(void)resetLightState:(NSImageView *)lightView{
     if (lightView) {
         [lightView setImage:[NSImage imageNamed:@"state_off"]];
@@ -326,9 +418,15 @@ BOOL isConnect = NO;
 }
 
 void show_log(NSString *string){
-    if (!isConnect) {
-        [ShowingLogVC postNotificationWithLog:string type:@"DEBUG ####"];
-    }
+//    if (!isConnect) {
+   
+        if (Eowyn_Count <= 1) {
+            [ShowingLogVC postNotificationWithLog:string type:@"DEBUG ####"];
+        }else{
+            NSLog(@"%@",string);
+        }
+        
+//    }
     
 }
 
@@ -355,6 +453,11 @@ bool initialI2C(Eowyn * eowyn,NSString * connectIP)
 }
 
 
+//- (IBAction)changeIP:(NSPopUpButton *)btn {
+//    connectingIp = btn.title;
+////    [self click_Connect:nil];
+//
+//}
 
 
 
@@ -369,13 +472,34 @@ bool initialI2C(Eowyn * eowyn,NSString * connectIP)
 //        show_log(@"Please confirm whether the network is normal");
 //        return;
 //    }
+    
+    
+    NSString *ip_address = [NSString stringWithFormat:@"ping %@ -t1",connectingIp];
+    
+        NSTask *task = [[NSTask alloc] init];
+        [task setLaunchPath:@"/bin/sh"];
+        
+        [task setArguments:[NSArray arrayWithObjects:@"-c",ip_address, nil]];
+        //        NSData *readData = nil;
+        NSPipe* nsreadPipe = [NSPipe pipe];
+        NSFileHandle *nsreadHandle = [nsreadPipe fileHandleForReading];
+        [task setStandardOutput: nsreadPipe];
+        [task launch];
+    
+    NSData *readData = [nsreadHandle availableData];
+   
+    NSString *reply = [[NSString alloc] initWithData:readData encoding:NSUTF8StringEncoding];
+        
+    if (!([reply containsString:@"icmp_seq="] &&[reply containsString:@"ttl="])) {
+        return;
+    }
     [self clickDisConnect:self.btnDisConnect];
-    NSString *connectIP = self.popTestType.title;
+//    NSString *connectIP = eowyn_IP;
 //    if ([self.popTestType.title isEqualToString:@"DFU Test"]) {
 //        connectIP = DFU_IP;
 //
 //    }
-    
+    NSString *connectIP = connectingIp;
     eowyn = nil;
     eowyn = [[Eowyn alloc] init];
     
@@ -515,6 +639,7 @@ int checkDUTSensor(Eowyn * eowyn){
             }
             
             ATDeviceDIOType in_sensor_stat = [eowyn readIO:IN_SENSOR];
+            NSLog(@"%@", [NSString stringWithFormat:@"cw_ATDeviceDIOType--%hhu",in_sensor_stat]);
             if (in_sensor_stat == IN_OUT_SENSOR_ON){
                 
                 [eowyn writeIO:elect_magnet value:GPIO_ON];//elect_magnet 12
@@ -721,7 +846,55 @@ int checkDUTSensor(Eowyn * eowyn){
         [self controlWithName:btn.title];
     }
 }
+- (IBAction)LoopStart:(id)sender {
+    StopLoop = YES;
+    [_LoopSignal startAnimation:nil];
+    threadLoop = [[NSThread alloc] initWithTarget:self selector:@selector(threadMonitor:) object:nil];
+    [threadLoop start];
+}
 
+- (IBAction)LoopStop:(id)sender {
+    StopLoop = NO;
+    [_LoopSignal stopAnimation:nil];
+}
+-(void)threadMonitor:(id)sender
+{
+//    NSInteger = [];
+    
+    for (int i=0; i<[_LoopT integerValue]; i++) {
+        if(i>=([_LoopT integerValue]-1)){
+            [_LoopSignal stopAnimation:nil];
+        }
+        [_CurrentTime setEnabled:YES];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [[self->_CurrentTime cell] setIntValue:(i+1)];
+        });
+        if(StopLoop == NO){
+            [_LoopSignal stopAnimation:nil];
+            break;
+        }
+        [self controlWithName:@"IN"];
+        [NSThread sleepForTimeInterval:2];
+        [self controlWithName:@"DOWN"];
+
+//        [self FixtureA_IN:self];
+//        [self FixtureA_DOWN:self];
+//
+        [NSThread sleepForTimeInterval:1];
+        [self controlWithName:@"UP"];
+        [NSThread sleepForTimeInterval:1];
+        [self controlWithName:@"OUT"];
+        
+        [NSThread sleepForTimeInterval:[_Delay_Time integerValue]];
+
+        
+        //        [self FixtureA_UP:self];
+//        [self FixtureA_OUT:self];
+        
+        
+    }
+    
+}
 
 -(void)get_state_dut:(NSString *)dut{
 
@@ -743,10 +916,10 @@ int checkDUTSensor(Eowyn * eowyn){
     ATDeviceDIOType up_io_stat = [eowyn readDutIO:read_port printLog:NO];
     if (up_io_stat==0){
         
-        show_log([NSString stringWithFormat:@"%@ iS ON\r",dut.uppercaseString]);
+        
         dispatch_async(dispatch_get_main_queue(), ^{
             if (lightView.tag!=1) {
-                [lightView setImage:[NSImage imageNamed:@"state_on"]];
+                [lightView setImage:[NSImage imageNamed:@"state_off"]];
                 lightView.tag=1;
             }
             
@@ -754,10 +927,10 @@ int checkDUTSensor(Eowyn * eowyn){
     }
     else if(up_io_stat==1){
         //show_log([NSString stringWithFormat:@"%@ iS OFF\r",dut.uppercaseString]);
-        
+        show_log([NSString stringWithFormat:@"%@ iS ON\r",dut.uppercaseString]);
         dispatch_async(dispatch_get_main_queue(), ^{
             if (lightView.tag!=0) {
-                [lightView setImage:[NSImage imageNamed:@"state_off"]];
+                [lightView setImage:[NSImage imageNamed:@"state_on"]];
                 lightView.tag=0;
             }
         });
@@ -829,21 +1002,25 @@ int checkDUTSensor(Eowyn * eowyn){
             if (!isConnect) {
                 break;
             }
-            [self get_state_dut:@"Dut1"];
-            
-            [self get_state_dut:@"Dut2"];
-            
-            [self get_state_dut:@"Dut3"];
-            
-            [self get_state_dut:@"Dut4"];
-            
-            [self get_state_sensor:@"up"];
-            
-            [self get_state_sensor:@"down"];
-            
-            [self get_state_sensor:@"in"];
-            
-            [self get_state_sensor:@"out"];
+            if (!is_stop) {
+                
+                [self get_state_dut:@"Dut1"];
+                
+                [self get_state_dut:@"Dut2"];
+                
+                [self get_state_dut:@"Dut3"];
+                
+                [self get_state_dut:@"Dut4"];
+                
+                [self get_state_sensor:@"up"];
+                
+                [self get_state_sensor:@"down"];
+                
+                [self get_state_sensor:@"in"];
+                
+                [self get_state_sensor:@"out"];
+                
+            }
             
             [NSThread sleepForTimeInterval:0.5];
             
@@ -853,6 +1030,350 @@ int checkDUTSensor(Eowyn * eowyn){
     });
 }
 
+- (int)data2Int:(NSData *)data{
+    Byte *byte = (Byte *)[data bytes];
+    // 有大小端模式问题？
+    return (byte[0] << 24) + (byte[1] << 16) + (byte[2] << 8) + (byte[3]);
+}
+
+-(NSData*)dataWithHexString:(NSString*)str{
+    
+    if (!str || [str length] == 0) {
+        return nil;
+    }
+    
+    NSMutableData *hexData = [[NSMutableData alloc] initWithCapacity:8];
+    NSRange range;
+    if ([str length] % 2 == 0) {
+        range = NSMakeRange(0, 2);
+    } else {
+        range = NSMakeRange(0, 1);
+    }
+    for (NSInteger i = range.location; i < [str length]; i += 2) {
+        unsigned int anInt;
+        NSString *hexCharStr = [str substringWithRange:range];
+        NSScanner *scanner = [[NSScanner alloc] initWithString:hexCharStr];
+        
+        [scanner scanHexInt:&anInt];
+        NSData *entity = [[NSData alloc] initWithBytes:&anInt length:1];
+        [hexData appendData:entity];
+        
+        range.location += range.length;
+        range.length = 2;
+    }
+    return hexData;
+    
+}
+-(NSString *)HexString_Cal_AND:(NSString *)First SEC:(NSString *)Secend
+{
+    NSMutableString *Value_CMD = [[NSMutableString alloc] init];
+    NSString *c = [NSString stringWithFormat:@"%c",[First characterAtIndex:0]];
+    unsigned long length = [First length];
+    if([c  isEqual: @"0"]){
+        NSLog(@"AND FUCNTION first_c NSString===%@",c);
+        [Value_CMD appendString:[NSString stringWithFormat:@"%@",First]];
+        NSData *data_1 =[self dataWithHexString:Value_CMD];
+        NSData *data_2 =[self dataWithHexString:Secend];
+        int data_1_int =[self data2Int:data_1];
+        int data_2_int =[self data2Int:data_2];
+        int data_3_int = data_1_int&data_2_int;
+        
+        NSString *sss_3b = [NSString stringWithFormat:@"%x",data_3_int];
+        NSString *sss_4 = [sss_3b substringToIndex:(length-1)];
+        NSString *cmd_result = @"0";
+        cmd_result = [cmd_result stringByAppendingString:sss_4];
+        NSLog(@"STRING AND FUNCTION the FIRST value is ===%@====The Secend is ===%@==cmd_result===%@",First,Secend,cmd_result);
+        return cmd_result;
+    }else{
+        NSLog(@"AND FUCNTION the first charect is not 0");
+        NSData *data_1 =[self dataWithHexString:First];
+        NSData *data_2 =[self dataWithHexString:Secend];
+        int data_1_int =[self data2Int:data_1];
+        int data_2_int =[self data2Int:data_2];
+        int data_3_int = data_1_int&data_2_int;
+        
+        NSString *sss_3b = [NSString stringWithFormat:@"%02x",data_3_int];
+        NSString *sss_4 = [sss_3b substringToIndex:length];
+        NSString *cmd_result = @"";
+        cmd_result = [cmd_result stringByAppendingString:sss_4];
+        NSLog(@"STRING AND FUNCTION the FIRST value is ===%@====The Secend is ==%@==cmd_result===%@",First,Secend,cmd_result);
+        return cmd_result;
+    }
+    
+}
+-(NSString *)HexString_Cal_OR:(NSString *)First SEC:(NSString *)Secend
+{
+    NSMutableString *Value_CMD = [[NSMutableString alloc] init];
+    NSString *c = [NSString stringWithFormat:@"%c",[First characterAtIndex:0]];
+    unsigned long length = [First length];
+    if([c  isEqual: @"0"]){
+        NSLog(@"OR FUCNTION first_c NSString===%@",c);
+        [Value_CMD appendString:[NSString stringWithFormat:@"%@",First]];
+        NSData *data_1 =[self dataWithHexString:Value_CMD];
+        NSData *data_2 =[self dataWithHexString:Secend];
+        int data_1_int =[self data2Int:data_1];
+        int data_2_int =[self data2Int:data_2];
+        int data_3_int = data_1_int|data_2_int;
+        
+        NSString *sss_3b = [NSString stringWithFormat:@"%x",data_3_int];
+        NSString *sss_4 = [sss_3b substringToIndex:(length-1)];
+        NSString *cmd_result = @"0";
+        cmd_result = [cmd_result stringByAppendingString:sss_4];
+        NSLog(@"STRING OR FUNCTION the FIRST value is ===%@====The Secend is ==%@==cmd_result===%@",First,Secend,cmd_result);
+        return cmd_result;
+    }else{
+        NSLog(@"OR FUCNTION the first charect is not 0");
+        NSData *data_1 =[self dataWithHexString:First];
+        NSData *data_2 =[self dataWithHexString:Secend];
+        int data_1_int =[self data2Int:data_1];
+        int data_2_int =[self data2Int:data_2];
+        int data_3_int = data_1_int|data_2_int;
+        
+        NSString *sss_3b = [NSString stringWithFormat:@"%02x",data_3_int];
+        NSString *sss_4 = [sss_3b substringToIndex:length];
+        NSString *cmd_result = @"";
+        cmd_result = [cmd_result stringByAppendingString:sss_4];
+        NSLog(@"STRING OR FUNCTION the FIRST value is ===%@====The Secend is ==%@==cmd_result===%@",First,Secend,cmd_result);
+        return cmd_result;
+    }
+    
+}
+-(void)setLedcolor:(NSString *)color uut:(NSString *)uut{
+    NSLog(@"first read LED ===color==%@===uut===%@",color,uut);
+//    show_log(@"in functionsetLedcolor ");
+
+    //    [eowyn writeI2CWithString:@"02ffff" writeadd:0x42 writelen:3 busId:0];
+    //    [eowyn writeI2CWithString:@"02ffff" writeadd:0x44 writelen:3 busId:0];
+    //    [eowyn writeI2CWithString:@"02ffff" writeadd:0x46 writelen:3 busId:0];
+    //    [eowyn writeI2CWithString:@"02ffff" writeadd:0x48 writelen:3 busId:0];
+
+    low_state_binary = @"FF";
+    high_state_binary = @"FF";
+    NSString *head = @"02";
+
+    NSString *Value_status = [eowyn readI2C_STR:0x48 readlen:2 busId:0];
+    sleep(0.1);
+    NSString *Value_slot12 = [eowyn readI2C_STR:0x44 readlen:2 busId:0];
+    sleep(0.1);
+    NSString *Value_slot34 = [eowyn readI2C_STR:0x4A readlen:2 busId:0];
+    sleep(0.1);
+    NSLog(@"first read LED value===%@===Value_slot12===%@===Value_slot34====%@",Value_status,Value_slot12,Value_slot34);
+
+    if (![Value_status.lowercaseString containsString:@"ff"] || ![Value_slot12.lowercaseString containsString:@"ff"] ||![Value_slot34.lowercaseString containsString:@"ff"] ){
+        NSLog(@"first read is nill====");
+        [eowyn writeI2CWithString:@"02FFFF" writeadd:0x48 writelen:3 busId:0];
+        sleep(0.05);
+        [eowyn writeI2CWithString:@"02FFFF" writeadd:0x4A writelen:3 busId:0];
+        sleep(0.05);
+        [eowyn writeI2CWithString:@"02FFFF" writeadd:0x44 writelen:3 busId:0];
+        sleep(0.2);
+        Value_status = [eowyn readI2C_STR:0x48 readlen:2 busId:0];
+        Value_slot12 = [eowyn readI2C_STR:0x44 readlen:2 busId:0];
+        Value_slot34 = [eowyn readI2C_STR:0x4A readlen:2 busId:0];
+        
+    }
+
+    Value_status = [head stringByAppendingString:Value_status];
+    Value_slot12 = [head stringByAppendingString:Value_slot12];
+    Value_slot34 = [head stringByAppendingString:Value_slot34];
+    NSLog(@"the led color and uut  is ===%@======%@==",color,uut);
+    NSLog(@"Value_RED read laste time is ===Value_status is==%@===Value_slot12 is==%@=====Value_slot34 is ==%@",Value_status,Value_slot12,Value_slot34);
+    NSMutableString *cmd = [[NSMutableString alloc] init];
+    int addr =0x02;
+    [cmd appendString:[NSString stringWithFormat:@"%02x",addr]];
+
+//    if ([color.lowercaseString containsString:@"reset"]) {
+////        [eowyn writeI2CWithString:@"02FFFF" writeadd:0x48 writelen:3 busId:0];
+////        [eowyn writeI2CWithString:@"02FFFF" writeadd:0x44 writelen:3 busId:0];
+////
+////        [eowyn writeI2CWithString:@"029F9F" writeadd:0x4A writelen:3 busId:0];
+//        return;
+//    }
+
+
+
+    if ([uut.lowercaseString containsString:@"1"]) {
+        Value_slot12 = [self HexString_Cal_OR:Value_slot12 SEC:@"02FF00"];
+
+        if ([color.lowercaseString containsString:@"red"]) {
+            Value_slot12 = [self HexString_Cal_AND:Value_slot12 SEC:@"02EFFF"];
+            NSLog(@"red 0x44 read back=====%@", Value_slot12);
+
+            NSLog(@"color is red  result_red=====%@===result_green is==%@====result_blue is ===%@",Value_slot12,Value_status,Value_slot34);
+            [eowyn writeI2CWithString:Value_slot12 writeadd:0x44 writelen:3 busId:0];//write green led
+        }else if ([color.lowercaseString containsString:@"green"]){
+            NSLog(@"green 0x44 read back=====%@", Value_slot12);
+
+            Value_slot12 = [self HexString_Cal_AND:Value_slot12 SEC:@"02DFFF"];
+            NSLog(@"======write to 0x44====%@",Value_slot12);
+            [eowyn writeI2CWithString:Value_slot12 writeadd:0x44 writelen:3 busId:0];//write green led
+
+        }else if ([color.lowercaseString containsString:@"blue"]){
+            NSLog(@"blue 0x44 read back=====%@", Value_slot12);
+            Value_slot12 = [self HexString_Cal_AND:Value_slot12 SEC:@"02BFFF"];
+            NSLog(@"0x44 after and value=====%@", Value_slot12);
+
+            NSLog(@"======write to 0x44====%@",Value_slot12);
+            [eowyn writeI2CWithString:Value_slot12 writeadd:0x44 writelen:3 busId:0];
+        }else if ([color.lowercaseString containsString:@"yellow"]){
+            NSLog(@"yellow 0x44 read back=====%@",Value_slot12);
+            Value_slot12 = [self HexString_Cal_AND:Value_slot12 SEC:@"027FFF"];
+            NSLog(@"======write to 0x44====%@",Value_slot12);
+            [eowyn writeI2CWithString:Value_slot12 writeadd:0x44 writelen:3 busId:0];
+        }else if ([color.lowercaseString containsString:@"reset"]){
+            NSLog(@"0x44 read back=====%@",Value_slot12);
+            Value_slot12 = [self HexString_Cal_AND:Value_slot12 SEC:@"027FFF"];
+            NSLog(@"======write to 0x44====%@",Value_slot12);
+            [eowyn writeI2CWithString:@"02FFFF" writeadd:0x44 writelen:3 busId:0];
+        }
+        show_log([NSString stringWithFormat:@"Set Slot: %@ Value: %@",uut,Value_slot12]);
+
+    }
+    else if ([uut.lowercaseString containsString:@"2"]){
+        Value_slot12 = [self HexString_Cal_OR:Value_slot12 SEC:@"0200FF"];
+
+        if ([color.lowercaseString containsString:@"red"]) {
+            Value_slot12 = [self HexString_Cal_AND:Value_slot12 SEC:@"02FFFE"];
+            [eowyn writeI2CWithString:Value_slot12 writeadd:0x44 writelen:3 busId:0];//write green led
+        }else if ([color.lowercaseString containsString:@"green"]){
+
+            Value_slot12 = [self HexString_Cal_AND:Value_slot12 SEC:@"02FFFD"];
+            [eowyn writeI2CWithString:Value_slot12 writeadd:0x44 writelen:3 busId:0];//write green led
+
+        }else if ([color.lowercaseString containsString:@"blue"]){
+            Value_slot12 = [self HexString_Cal_AND:Value_slot12 SEC:@"02FFFB"];
+            [eowyn writeI2CWithString:Value_slot12 writeadd:0x44 writelen:3 busId:0];
+        }else if ([color.lowercaseString containsString:@"yellow"]){
+            NSLog(@"0x44 read back=====%@",Value_slot12);
+            Value_slot12 = [self HexString_Cal_AND:Value_slot12 SEC:@"02FFF7"];
+            NSLog(@"======write to 0x44====%@",Value_slot12);
+            [eowyn writeI2CWithString:Value_slot12 writeadd:0x44 writelen:3 busId:0];
+        }else if ([color.lowercaseString containsString:@"reset"]){
+            NSLog(@"0x44 read back=====%@",Value_slot12);
+            Value_slot12 = [self HexString_Cal_AND:Value_slot12 SEC:@"02FFF7"];
+            NSLog(@"======write to 0x44====%@",Value_slot12);
+            [eowyn writeI2CWithString:@"02FFFF" writeadd:0x44 writelen:3 busId:0];
+        }
+        show_log([NSString stringWithFormat:@"Set Slot: %@ Value: %@",uut,Value_slot12]);
+
+    }
+    else if ([uut.lowercaseString containsString:@"3"]){
+        Value_slot34 = [self HexString_Cal_OR:Value_slot34 SEC:@"02FF00"];
+
+        if ([color.lowercaseString containsString:@"red"]) {
+            Value_slot34 = [self HexString_Cal_AND:Value_slot34 SEC:@"02EFFF"];
+            [eowyn writeI2CWithString:Value_slot34 writeadd:0x4A writelen:3 busId:0];//write green led
+        }else if ([color.lowercaseString containsString:@"green"]){
+            Value_slot34 = [self HexString_Cal_AND:Value_slot34 SEC:@"02DFFF"];
+            [eowyn writeI2CWithString:Value_slot34 writeadd:0x4A writelen:3 busId:0];//write green led
+
+        }else if ([color.lowercaseString containsString:@"blue"]){
+            Value_slot34 = [self HexString_Cal_AND:Value_slot34 SEC:@"02BFFF"];
+            [eowyn writeI2CWithString:Value_slot34 writeadd:0x4A writelen:3 busId:0];
+        }else if ([color.lowercaseString containsString:@"yellow"]){
+            Value_slot34 = [self HexString_Cal_AND:Value_slot34 SEC:@"027FFF"];
+            [eowyn writeI2CWithString:Value_slot34 writeadd:0x4A writelen:3 busId:0];
+        }else if ([color.lowercaseString containsString:@"reset"]){
+            Value_slot34 = [self HexString_Cal_AND:Value_slot34 SEC:@"027FFF"];
+            [eowyn writeI2CWithString:@"02FFFF" writeadd:0x4A writelen:3 busId:0];
+        }
+        show_log([NSString stringWithFormat:@"Set Slot: %@ Value: %@",uut,Value_slot34]);
+
+    }
+    else if ([uut.lowercaseString containsString:@"4"]){
+        Value_slot34 = [self HexString_Cal_OR:Value_slot34 SEC:@"0200FF"];
+        if ([color.lowercaseString containsString:@"red"]) {
+            Value_slot34 = [self HexString_Cal_AND:Value_slot34 SEC:@"02FFFE"];
+            [eowyn writeI2CWithString:Value_slot34 writeadd:0x4A writelen:3 busId:0];//write green led
+        }else if ([color.lowercaseString containsString:@"green"]){
+            Value_slot34 = [self HexString_Cal_AND:Value_slot34 SEC:@"02FFFD"];
+            [eowyn writeI2CWithString:Value_slot34 writeadd:0x4A writelen:3 busId:0];//write green led
+
+        }else if ([color.lowercaseString containsString:@"blue"]){
+            Value_slot34 = [self HexString_Cal_AND:Value_slot34 SEC:@"02FFFB"];
+            [eowyn writeI2CWithString:Value_slot34 writeadd:0x4A writelen:3 busId:0];
+
+        }else if ([color.lowercaseString containsString:@"yellow"]){
+            Value_slot34 = [self HexString_Cal_AND:Value_slot34 SEC:@"02FFF7"];
+
+            [eowyn writeI2CWithString:Value_slot34 writeadd:0x4A writelen:3 busId:0];
+        }else if ([color.lowercaseString containsString:@"reset"]){
+            Value_slot34 = [self HexString_Cal_AND:Value_slot34 SEC:@"02FFF7"];
+
+            [eowyn writeI2CWithString:@"02FFFF" writeadd:0x4A writelen:3 busId:0];
+        }
+        show_log([NSString stringWithFormat:@"Set Slot: %@ Value: %@",uut,Value_slot34]);
+
+    }
+    else if ([uut.lowercaseString containsString:@"fixture"]){//status
+
+        Value_status = [self HexString_Cal_OR:Value_status SEC:@"020810"];
+
+        if ([color.lowercaseString containsString:@"red"]) {
+            Value_status = [self HexString_Cal_OR:Value_status SEC:@"02FEFF"];
+            NSLog(@"uut===%@===Value_status===%@",uut,Value_status);
+            
+//            [eowyn writeI2CWithString:Value_status writeadd:0x48 writelen:3 busId:0];//write green led
+            [eowyn writeI2CWithString:@"02FEFF" writeadd:0x48 writelen:3 busId:0];//write green led
+
+        }else if ([color.lowercaseString containsString:@"green"]){
+            Value_status = [self HexString_Cal_OR:Value_status SEC:@"02FDFF"];
+            NSLog(@"uut===%@===Value_status===%@",uut,Value_status);
+
+//            [eowyn writeI2CWithString:Value_status writeadd:0x48 writelen:3 busId:0];//write green led
+            [eowyn writeI2CWithString:@"02FDFF" writeadd:0x48 writelen:3 busId:0];//write green led
+
+        }else if ([color.lowercaseString containsString:@"blue"]){
+            Value_status = [self HexString_Cal_OR:Value_status SEC:@"02FBFF"];
+            NSLog(@"uut===%@===Value_status===%@",uut,Value_status);
+
+//            [eowyn writeI2CWithString:Value_status writeadd:0x48 writelen:3 busId:0];
+            [eowyn writeI2CWithString:@"02FBFF" writeadd:0x48 writelen:3 busId:0];//write green led
+
+        }else if ([color.lowercaseString containsString:@"yellow"]){
+            Value_status = [self HexString_Cal_OR:Value_status SEC:@"02FF7F"];
+            NSLog(@"uut===%@===Value_status===%@",uut,Value_status);
+//            [eowyn writeI2CWithString:Value_status writeadd:0x48 writelen:3 busId:0];//write green led
+
+            [eowyn writeI2CWithString:@"02FF7F" writeadd:0x48 writelen:3 busId:0];
+        }else if ([color.lowercaseString containsString:@"reset"]){
+            Value_status = [self HexString_Cal_OR:Value_status SEC:@"02FF7F"];
+            NSLog(@"uut===%@===Value_status===%@",uut,Value_status);
+            [eowyn writeI2CWithString:@"02FFFF" writeadd:0x48 writelen:3 busId:0];
+        }
+        show_log([NSString stringWithFormat:@"Set Slot: %@ Value: %@",uut,Value_status]);
+
+    }
+
+//    if ([uut.lowercaseString containsString:@"fixture"]) {
+//        [eowyn writeI2CWithString:cmd writeadd:0x48 writelen:3 busId:0];
+//    }
+    //    else{
+    //        if ([color.lowercaseString containsString:@"red"]) {
+    //            NSLog(@"color is red  result_red=====%@===result_green is==%@====result_blue is ===%@",result_red,result_green,result_blue);
+    //
+    //            [eowyn writeI2CWithString:result_green writeadd:0x46 writelen:3 busId:0];//write green led
+    //            [eowyn writeI2CWithString:result_blue writeadd:0x44 writelen:3 busId:0];//write blue led
+    //
+    //            [eowyn writeI2CWithString:result_red writeadd:0x42 writelen:3 busId:0];//write red led
+    //        }else if ([color.lowercaseString containsString:@"green"]){
+    //                    NSLog(@"color is green  result_red=====%@===result_green is==%@====result_blue is ===%@",result_red,result_green,result_blue);
+    //            [eowyn writeI2CWithString:result_blue writeadd:0x44 writelen:3 busId:0];//write blue led
+    //            [eowyn writeI2CWithString:result_red writeadd:0x42 writelen:3 busId:0];//write red led
+    //
+    //            [eowyn writeI2CWithString:result_green writeadd:0x46 writelen:3 busId:0];//write green led
+    //
+    //        }else if ([color.lowercaseString containsString:@"blue"]){
+    //            NSLog(@"color is blue  result_red=====%@===result_green is==%@====result_blue is ===%@",result_red,result_green,result_blue);
+    //
+    //            [eowyn writeI2CWithString:@"02FFFF" writeadd:0x42 writelen:3 busId:0];
+    //            [eowyn writeI2CWithString:@"02FFFF" writeadd:0x44 writelen:3 busId:0];
+    //
+    //            [eowyn writeI2CWithString:@"029F9F" writeadd:0x46 writelen:3 busId:0];
+    //        }
+    //    }
+
+}
 
 -(void)ledWithLowAddr:(int)low_addr high_addr:(int)high_addr uut:(NSString *)uut color:(NSString *)color{
     
@@ -1045,6 +1566,44 @@ int checkDUTSensor(Eowyn * eowyn){
     [self setLedLight2:btn];
 }
 
+///NSInteger IN_GPIO=8;
+//NSInteger OUT_GPIO=9;
+//NSInteger DOWN_GPIO=10;
+//NSInteger UP_GPIO=11;
+
+- (IBAction)click_dout:(NSButton *)sender {
+    NSString *DOut = self.DOut.titleOfSelectedItem;
+     NSString *ONOFF = sender.title;
+    NSInteger Value = 100;
+    NSInteger ONOFF_Value = 0;
+    if([DOut isEqualToString:@"Megnet"]){
+        Value = 13;
+    }
+    else if ([DOut isEqualToString:@"IN"]){
+        Value = 8;
+    }
+    else if ([DOut isEqualToString:@"OUT"]){
+        Value = 9;
+    }
+    else if ([DOut isEqualToString:@"UP"]){
+        Value = 11;
+    }
+    else if ([DOut isEqualToString:@"DOWN"]){
+        Value = 10;
+    }
+    else if ([DOut isEqualToString:@"NONE"]){
+        Value = [_DOut_Value integerValue];
+        
+        NSLog(@"the valueis ==%ld",(long)Value);
+    }
+    if([ONOFF isEqualToString:@"ON"]){
+        ONOFF_Value = 1;
+    }else if ([ONOFF isEqualToString:@"OFF"]){
+        ONOFF_Value = 0;
+
+    }
+    [eowyn writeIO:Value value:ONOFF_Value];
+}
 
 -(void)setLedLight1:(NSButton *)btn{
     
@@ -1142,9 +1701,14 @@ int checkDUTSensor(Eowyn * eowyn){
 //        address = 0x43;
 //    }
 //
-    
-    [self ledWithColor:color uut:uut];
-    
+    NSLog(@"LED_color===%@===uut====%@",color,uut);
+    NSString *OLD = [eowyn readI2C_STR:0x42 readlen:2 busId:0];
+    if(OLD){
+        [self ledWithColor:color uut:uut];
+    }else{
+    [self setLedcolor:color uut:uut];
+    }
+//    [self ledWithColor_bundle:color uut:uut];
 //    if ([device.lowercaseString containsString:@"uut1"]) {
 //        [self ledWithLowAddr:color uut:@"uut1"];
 //    }else if ([device.lowercaseString containsString:@"uut2"]){
@@ -1305,6 +1869,9 @@ int checkDUTSensor(Eowyn * eowyn){
     
     NSString *path =[[NSString cw_getResourcePath] stringByAppendingPathComponent:@"Eowyn_ports.json"];
     NSDictionary *cmdList = [CWFileManager cw_serializationWithJsonFilePath:path];
+    if (cmdList==nil) {
+        return;
+    }
     UP_GPIO =[[cmdList objectForKey:@"UP_GPIO"] integerValue];
     DOWN_GPIO =[[cmdList objectForKey:@"DOWN_GPIO"]integerValue];
     IN_GPIO =[[cmdList objectForKey:@"IN_GPIO"]integerValue];
@@ -1342,10 +1909,16 @@ int checkDUTSensor(Eowyn * eowyn){
     DUT2_STATE =[[cmdList objectForKey:@"DUT2_STATE"]intValue];
     DUT3_STATE =[[cmdList objectForKey:@"DUT3_STATE"]intValue];
     DUT4_STATE =[[cmdList objectForKey:@"DUT4_STATE"]intValue];
+    eowyn_IP =[cmdList objectForKey:@"Eowyn_IP"];
+    NSString *setIps =[cmdList objectForKey:@"AllowSetIps"];
+    if (setIps.length) {
+        AllowSetIps = setIps;
+    }
     
-    Default_IP =[cmdList objectForKey:@"Default_IP"];
-    FCT_IP =[cmdList objectForKey:@"FCT_IP"];
-    DFU_IP =[cmdList objectForKey:@"DFU_IP"];
+    Eowyn_Count =[[cmdList objectForKey:@"Eowyn_Count"]intValue];
+    
+//    FCT_IP =[cmdList objectForKey:@"FCT_IP"];
+//    DFU_IP =[cmdList objectForKey:@"DFU_IP"];
     
 }
 
@@ -1407,12 +1980,10 @@ int checkDUTSensor(Eowyn * eowyn){
     if (cmdList==nil) {
         return;
     }
-//    NSDictionary *par = [cmdList objectForKey:@"parameters"];
-//    float commandDelay= [[par objectForKey:@"commandDelay"] floatValue];
-//    NSInteger times=[[par objectForKey:@"loopTimes"] integerValue];
+    NSDictionary *par = [cmdList objectForKey:@"parameters"];
+    float commandDelay= [[par objectForKey:@"commandDelay"] floatValue];
+    NSInteger times=[[par objectForKey:@"loopTimes"] integerValue];
     
-    float commandDelay= [self.delayView.stringValue floatValue];
-    NSInteger times= [self.loopView.stringValue integerValue];
     NSArray *arr = [cmdList objectForKey:@"commands"];
     
     // dispatch_async(dispatch_get_global_queue(0, 0), ^{
@@ -1424,13 +1995,11 @@ int checkDUTSensor(Eowyn * eowyn){
                 break;
             }
             NSString *command = arr[j];
-//            NSInteger index = [self stringToIndex:command];
+            NSInteger index = [self stringToIndex:command];
             //[self.popDebug selectItemAtIndex]=index;
-//            [self.popDebug selectItemAtIndex:index];
-//            [self clickSend:self.btnSend];
-       
-            [self controlWithName:command.lowercaseString];
-
+            [self.popDebug selectItemAtIndex:index];
+            [self clickSend:self.btnSend];
+            
             [NSThread sleepForTimeInterval:commandDelay];
             
         }

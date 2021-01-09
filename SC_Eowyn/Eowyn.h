@@ -27,7 +27,7 @@
 -(int)readFanI2C:(int)readadd readlen:(int)len;
 -(int)readDUTI2C:(int)readadd readlen:(int)len;
 -(NSString *)getBinaryByHex:(NSString *)hex;
-
+-(NSString *)getHexByBinary:(NSString *)hex;
 -(BOOL)writeI2C:(uint8_t *)writeData writeadd:(int)add writelen:(int)length busId:(int)busId;
 -(BOOL)writeI2CWithString:(NSString *)writeString writeadd:(int)add writelen:(int)length busId:(int)busId;
 -(int)readI2C:(int)readadd readlen:(int)len busId:(int)busId;
@@ -36,5 +36,8 @@
 -(void)close;
 -(ATDeviceDIOType)readIO:(NSInteger)iOIndex printLog:(BOOL)printLog;
 -(ATDeviceDIOType)readDutIO:(NSInteger)iOIndex printLog:(BOOL)printLog;
+-(NSString *)readI2C_STR:(int)readadd readlen:(int)len busId:(int)busId;
+-(BOOL) setEowynIPAddressWithIPString:(NSString *)ipAddress andError:(NSError **)aError;
+-(BOOL) setEowynNetMaskWithIPString:(NSString *)netMask andError:(NSError **)aError;
 @end
 
